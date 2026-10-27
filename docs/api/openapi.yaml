@@ -1,0 +1,2051 @@
+openapi: 3.0.3
+info:
+  title: Dating Cloud API
+  version: 0.1.0-proposed
+  license:
+    name: Proprietary
+  description: |
+    **STATUS: PROPOSED CONTRACT — NOT IMPLEMENTED.**
+    No backend exists for this project yet. Every path below is a proposal the
+    Flutter app's `Api*Repository` classes are written against. Endpoints the
+    app calls today are marked `x-client-status: used`; others are
+    `x-client-status: planned`.
+
+    Conventions:
+    - Base path `/api/v1`. JSON only. Timestamps are ISO-8601 UTC.
+    - Every response uses the envelope `{ success, data | error, meta }`.
+    - Lists return `data: { items: [...], nextCursor: string | null }`.
+      Pass `nextCursor` back as `cursor`. `limit` is 1–50 (default 20).
+    - Mutations that must not be applied twice accept an `Idempotency-Key`
+      header (UUID v4). Replays within 24 h return the original response.
+    - Rate limits are per user (or per IP + phone for unauthenticated calls)
+      and return `429 RATE_LIMITED` with a `Retry-After` header.
+    - Blocks are enforced server-side on every endpoint: a blocked or
+      blocking member never appears in discovery, likes, matches, chats or
+      profile lookups (`404 NOT_FOUND`, never `USER_BLOCKED`, to avoid leaking
+      block state) — except when acting on the block itself.
+    - Distances are rounded to whole kilometres; exact coordinates are never
+      returned.
+servers:
+  - url: https://api.example.invalid/api/v1
+    description: Placeholder production server
+  - url: http://localhost:3000/api/v1
+    description: Local development backend
+security:
+  - bearerAuth: []
+tags:
+  - name: Auth
+    description: Phone OTP (primary), email/password and social sign-in; token rotation.
+  - name: Profile
+    description: Own profile, preferences, interests, photos and verification.
+  - name: Media
+    description: Direct-to-storage uploads via pre-signed URLs, with server-side validation and moderation.
+  - name: Discovery
+    description: Ranked candidate feed with filters.
+  - name: Swipes
+    description: Like / pass / super-like / undo and likes lists.
+  - name: Matches
+    description: Mutual matches.
+  - name: Chat
+    description: Conversations and messages (REST; realtime events in socket_events.md).
+  - name: Safety
+    description: Block and report.
+  - name: Notifications
+    description: Push device registration, inbox and preferences.
+  - name: Subscriptions
+    description: Store products and server-verified entitlements.
+  - name: Support
+    description: FAQs and support tickets.
+  - name: Account
+    description: Account deletion and data export.
+  - name: Admin
+    description: Requires role `MODERATOR` or `ADMIN`. Every write is audit-logged.
+
+paths:
+  # ───────────────────────────── Auth ─────────────────────────────
+  /auth/register:
+    post:
+      tags: [Auth]
+      operationId: register
+      summary: Create an account with email and password
+      x-client-status: planned
+      x-rate-limit: 5 per hour per IP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created and signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '403': { $ref: '#/components/responses/AccountIneligible' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      operationId: login
+      summary: Sign in with email and password
+      x-client-status: planned
+      x-rate-limit: 10 per 15 minutes per IP + email
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /auth/otp/request:
+    post:
+      tags: [Auth]
+      operationId: requestOtp
+      summary: Send a one-time code by SMS
+      x-client-status: used
+      x-rate-limit: 3 per 10 minutes per phone number; 20 per hour per IP
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OtpRequest' }
+      responses:
+        '200':
+          description: Code sent. The response never reveals whether the number is registered.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OtpChallengeResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /auth/otp/verify:
+    post:
+      tags: [Auth]
+      operationId: verifyOtp
+      summary: Exchange a one-time code for tokens
+      description: 'Creates the account on first verification (`isNewUser: true`). Five wrong attempts invalidate the code.'
+      x-client-status: used
+      x-rate-limit: 5 attempts per code; 10 per 10 minutes per phone number
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OtpVerifyRequest' }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResultResponse' }
+        '400':
+          description: Wrong or expired code, or invalid input.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+              examples:
+                invalid:
+                  value: { success: false, error: { code: OTP_INVALID, message: That code is incorrect., details: [] }, meta: { requestId: req_01HZX } }
+                expired:
+                  value: { success: false, error: { code: OTP_EXPIRED, message: That code has expired. Request a new one., details: [] }, meta: { requestId: req_01HZY } }
+        '403': { $ref: '#/components/responses/AccountIneligible' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /auth/token/refresh:
+    post:
+      tags: [Auth]
+      operationId: refreshToken
+      summary: Rotate the refresh token and issue a new access token
+      description: Refresh tokens are single-use. Reusing a rotated token revokes the whole token family (theft detection).
+      x-client-status: used
+      x-rate-limit: 30 per hour per user
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200':
+          description: New token pair.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthTokensResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /auth/logout:
+    post:
+      tags: [Auth]
+      operationId: logout
+      summary: Revoke the refresh token
+      x-client-status: used
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RefreshRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /auth/social/{provider}:
+    post:
+      tags: [Auth]
+      operationId: socialLogin
+      summary: Sign in with Apple or Google
+      description: The server verifies `idToken` with the provider. The client never holds provider secrets.
+      x-client-status: planned
+      x-rate-limit: 10 per 15 minutes per IP
+      security: []
+      parameters:
+        - name: provider
+          in: path
+          required: true
+          schema: { type: string, enum: [apple, google] }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SocialLoginRequest' }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/AccountIneligible' }
+        '501': { $ref: '#/components/responses/FeatureNotConfigured' }
+
+  # ───────────────────────────── Profile ─────────────────────────────
+  /profile/me:
+    get:
+      tags: [Profile]
+      operationId: getMyProfile
+      summary: The signed-in member's profile and preferences
+      description: Also used by the app to validate a restored session.
+      x-client-status: used
+      responses:
+        '200':
+          description: Own profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '500': { $ref: '#/components/responses/ServerError' }
+    patch:
+      tags: [Profile]
+      operationId: updateMyProfile
+      summary: Update editable profile fields
+      description: Only provided fields change. `age` derives from date of birth and cannot be edited.
+      x-client-status: used
+      x-rate-limit: 30 per hour
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileUpdateRequest' }
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /profiles/{userId}:
+    get:
+      tags: [Profile]
+      operationId: getProfile
+      summary: Another member's public profile
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Public profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicProfileResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /profile/preferences:
+    put:
+      tags: [Profile]
+      operationId: updatePreferences
+      summary: Replace dating preferences
+      x-client-status: used
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DatingPreferences' }
+      responses:
+        '200':
+          description: Saved preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DatingPreferencesResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /profile/onboarding:
+    post:
+      tags: [Profile]
+      operationId: completeOnboarding
+      summary: Create the member's profile after first sign-in
+      description: >-
+        Called once, when `AuthResult.user.onboardingComplete` is false. The
+        server is the authority on the age check. The 2–6 photos are uploaded
+        first via `/media/upload-url` and `/media/complete`, then referenced
+        here by `photoMediaIds`; later changes use `/profile/photos`.
+      x-client-status: used
+      x-rate-limit: 10 per hour
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OnboardingRequest' }
+      responses:
+        '200':
+          description: Profile created; `onboardingComplete` is now true.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/AccountIneligible' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /interests:
+    get:
+      tags: [Profile]
+      operationId: listInterests
+      summary: Catalogue of selectable interests
+      x-client-status: used
+      responses:
+        '200':
+          description: Interests.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InterestListResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /profile/interests:
+    put:
+      tags: [Profile]
+      operationId: setMyInterests
+      summary: Replace the member's interests (1–10)
+      x-client-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SetInterestsRequest' }
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /profile/photos:
+    post:
+      tags: [Profile]
+      operationId: addPhoto
+      summary: Attach an uploaded media item as a profile photo (max 6)
+      description: The media must be `APPROVED` by moderation, or it is attached as `PENDING` and hidden from others until approved.
+      x-client-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AddPhotoRequest' }
+      responses:
+        '201':
+          description: Photo attached.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '422': { $ref: '#/components/responses/MediaRejected' }
+
+  /profile/photos/order:
+    patch:
+      tags: [Profile]
+      operationId: reorderPhotos
+      summary: Reorder profile photos
+      x-client-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/PhotoOrderRequest' }
+      responses:
+        '200':
+          description: New order.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /profile/photos/{photoId}:
+    delete:
+      tags: [Profile]
+      operationId: deletePhoto
+      summary: Remove a profile photo (at least one must remain)
+      x-client-status: planned
+      parameters:
+        - name: photoId
+          in: path
+          required: true
+          schema: { type: string, example: pho_01HZX }
+      responses:
+        '200':
+          description: Updated profile.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyProfileResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /profile/verification:
+    post:
+      tags: [Profile]
+      operationId: submitVerification
+      summary: Submit a selfie for photo verification
+      x-client-status: planned
+      x-rate-limit: 3 per day
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerificationRequest' }
+      responses:
+        '202':
+          description: Submitted for review.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/VerificationStatusResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ───────────────────────────── Media ─────────────────────────────
+  /media/upload-url:
+    post:
+      tags: [Media]
+      operationId: createUploadUrl
+      summary: Get a short-lived pre-signed URL to upload a file directly to storage
+      description: >-
+        The client then sends `PUT uploadUrl` with the returned `headers` and
+        the raw bytes. That request goes to storage, not the API, and carries
+        no `Authorization` header.
+      x-client-status: used
+      x-rate-limit: 30 per hour
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UploadUrlRequest' }
+      responses:
+        '201':
+          description: Upload target.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UploadUrlResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /media/complete:
+    post:
+      tags: [Media]
+      operationId: completeUpload
+      summary: Confirm an upload; the server validates type/size and queues moderation
+      description: >-
+        A `status` of `REJECTED` (or a 422 MEDIA_REJECTED) means the photo
+        cannot be used; the app asks for another one.
+      x-client-status: used
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MediaCompleteRequest' }
+      responses:
+        '200':
+          description: Media record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/MediaRejected' }
+
+  /media/{mediaId}:
+    get:
+      tags: [Media]
+      operationId: getMedia
+      summary: Media metadata and a signed read URL (owner, or a match for chat attachments)
+      x-client-status: planned
+      parameters:
+        - name: mediaId
+          in: path
+          required: true
+          schema: { type: string, example: med_01HZX }
+      responses:
+        '200':
+          description: Media record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MediaResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Discovery & swipes ─────────────────────────────
+  /discovery:
+    get:
+      tags: [Discovery]
+      operationId: getDiscovery
+      summary: Ranked candidates near the member
+      description: Excludes the member, anyone already swiped/matched, blocked in either direction, suspended, or outside both members' preferences.
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - { name: minAge, in: query, schema: { type: integer, minimum: 18, maximum: 99, default: 18 } }
+        - { name: maxAge, in: query, schema: { type: integer, minimum: 18, maximum: 99, default: 99 } }
+        - { name: distanceKm, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: A page of candidates.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/PublicProfilePageResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '500': { $ref: '#/components/responses/ServerError' }
+
+  /swipes:
+    post:
+      tags: [Swipes]
+      operationId: createSwipe
+      summary: Like, pass or super-like a member
+      description: |
+        Atomically records the swipe and, if the target already liked the
+        member, creates the match and conversation in the same transaction
+        (exactly one match per pair even under concurrent swipes).
+        Free tier: 50 likes and 1 super-like per 24 h → `403 SUBSCRIPTION_REQUIRED`.
+      x-client-status: used
+      x-rate-limit: 120 per minute
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SwipeRequest' }
+      responses:
+        '200':
+          description: Swipe recorded (or replayed via Idempotency-Key).
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SwipeResultResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/SubscriptionRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /swipes/undo:
+    post:
+      tags: [Swipes]
+      operationId: undoSwipe
+      summary: Undo the most recent swipe that did not create a match
+      x-client-status: used
+      responses:
+        '200':
+          description: Restored profile, to put back on top of the deck.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UndoResultResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/SubscriptionRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /likes/received:
+    get:
+      tags: [Swipes]
+      operationId: listLikesReceived
+      summary: Members who liked you and you have not swiped on (premium)
+      description: Free tier gets `403 SUBSCRIPTION_REQUIRED` with `details[0].reason` = the count, e.g. `COUNT_12`.
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of likes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LikePageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/SubscriptionRequired' }
+
+  /likes/sent:
+    get:
+      tags: [Swipes]
+      operationId: listLikesSent
+      summary: Members you liked who have not matched yet
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of likes.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LikePageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  # ───────────────────────────── Matches ─────────────────────────────
+  /matches:
+    get:
+      tags: [Matches]
+      operationId: listMatches
+      summary: Active matches, newest first
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of matches.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /matches/{matchId}:
+    get:
+      tags: [Matches]
+      operationId: getMatch
+      summary: One match (participants only)
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200':
+          description: The match.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /matches/{matchId}/unmatch:
+    post:
+      tags: [Matches]
+      operationId: unmatch
+      summary: End a match; the conversation is closed for both members
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/MatchId'
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ───────────────────────────── Chat ─────────────────────────────
+  /conversations:
+    get:
+      tags: [Chat]
+      operationId: listConversations
+      summary: Conversations ordered by most recent activity
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of conversations.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /conversations/{conversationId}:
+    get:
+      tags: [Chat]
+      operationId: getConversation
+      summary: One conversation (participants only)
+      description: Added to the original list so the chat screen can load its header without the conversation list.
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+      responses:
+        '200':
+          description: The conversation.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ConversationResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /conversations/{conversationId}/messages:
+    get:
+      tags: [Chat]
+      operationId: listMessages
+      summary: Messages, oldest-first within a page; `nextCursor` loads older messages
+      x-client-status: used
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/Cursor'
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 50 } }
+      responses:
+        '200':
+          description: A page of messages.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessagePageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/MatchRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Chat]
+      operationId: sendMessage
+      summary: Send a text message
+      description: Also emitted over Socket.IO as `message:new` to both participants. `clientMessageId` doubles as the idempotency key.
+      x-client-status: used
+      x-rate-limit: 30 per minute per conversation; 300 per hour
+      parameters:
+        - $ref: '#/components/parameters/ConversationId'
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SendMessageRequest' }
+      responses:
+        '201':
+          description: Stored message.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MessageResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/MatchRequired' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /messages/{messageId}/read:
+    post:
+      tags: [Chat]
+      operationId: markMessageRead
+      summary: Mark this and all earlier messages in the conversation as read
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /messages/{messageId}/report:
+    post:
+      tags: [Chat, Safety]
+      operationId: reportMessage
+      summary: Report a received message
+      x-client-status: planned
+      x-rate-limit: 20 per day
+      parameters:
+        - $ref: '#/components/parameters/MessageId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MessageReportRequest' }
+      responses:
+        '201':
+          description: Report filed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ───────────────────────────── Safety ─────────────────────────────
+  /users/{userId}/block:
+    post:
+      tags: [Safety]
+      operationId: blockUser
+      summary: Block a member (also unmatches); idempotent
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Safety]
+      operationId: unblockUser
+      summary: Remove a block; does not restore the match
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /blocks:
+    get:
+      tags: [Safety]
+      operationId: listBlocks
+      summary: Members you have blocked
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of blocks.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BlockPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /reports:
+    post:
+      tags: [Safety]
+      operationId: createReport
+      summary: Report a member or photo
+      x-client-status: planned
+      x-rate-limit: 20 per day
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ReportRequest' }
+      responses:
+        '201':
+          description: Report filed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReportResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ───────────────────────────── Notifications ─────────────────────────────
+  /devices:
+    post:
+      tags: [Notifications]
+      operationId: registerDevice
+      summary: Register or refresh an FCM push token (upsert by token)
+      x-client-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceRegistration' }
+      responses:
+        '200':
+          description: Device record.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /devices/{deviceId}:
+    delete:
+      tags: [Notifications]
+      operationId: unregisterDevice
+      summary: Stop push notifications to a device (called on sign-out)
+      x-client-status: planned
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema: { type: string, example: dev_01HZX }
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notifications:
+    get:
+      tags: [Notifications]
+      operationId: listNotifications
+      summary: In-app notification inbox, newest first
+      x-client-status: planned
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+      responses:
+        '200':
+          description: A page of notifications.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /notifications/{notificationId}/read:
+    post:
+      tags: [Notifications]
+      operationId: markNotificationRead
+      summary: Mark a notification as read
+      x-client-status: planned
+      parameters:
+        - name: notificationId
+          in: path
+          required: true
+          schema: { type: string, example: ntf_01HZX }
+      responses:
+        '200': { $ref: '#/components/responses/OkEmpty' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /notification-preferences:
+    get:
+      tags: [Notifications]
+      operationId: getNotificationPreferences
+      summary: Push and email notification preferences
+      x-client-status: planned
+      responses:
+        '200':
+          description: Preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferencesResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+    patch:
+      tags: [Notifications]
+      operationId: updateNotificationPreferences
+      summary: Update notification preferences (partial)
+      x-client-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationPreferences' }
+      responses:
+        '200':
+          description: Preferences.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NotificationPreferencesResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  # ───────────────────────────── Subscriptions ─────────────────────────────
+  /subscriptions/products:
+    get:
+      tags: [Subscriptions]
+      operationId: listProducts
+      summary: Purchasable products for the member's platform and region
+      x-client-status: used
+      responses:
+        '200':
+          description: Products. Wrapped in `items`, not paginated.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductListResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /subscriptions/entitlement:
+    get:
+      tags: [Subscriptions]
+      operationId: getEntitlement
+      summary: Server-verified entitlement (the only source of truth for premium features)
+      x-client-status: used
+      responses:
+        '200':
+          description: Current entitlement.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntitlementResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /subscriptions/verify:
+    post:
+      tags: [Subscriptions]
+      operationId: verifyPurchase
+      summary: Verify a store purchase with Apple/Google and grant entitlement
+      description: Idempotent per store transaction ID. Store server notifications (webhooks) keep entitlement current after renewal/refund.
+      x-client-status: planned
+      x-rate-limit: 20 per hour
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/VerifyPurchaseRequest' }
+      responses:
+        '200':
+          description: Entitlement after verification.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntitlementResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '501': { $ref: '#/components/responses/FeatureNotConfigured' }
+
+  /subscriptions/restore:
+    post:
+      tags: [Subscriptions]
+      operationId: restorePurchases
+      summary: Re-verify existing store purchases (new device / reinstall)
+      x-client-status: planned
+      x-rate-limit: 10 per hour
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RestorePurchasesRequest' }
+      responses:
+        '200':
+          description: Entitlement after restore.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EntitlementResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # ───────────────────────────── Support & account ─────────────────────────────
+  /support/faqs:
+    get:
+      tags: [Support]
+      operationId: listFaqs
+      summary: Help-centre FAQs
+      x-client-status: planned
+      security: []
+      responses:
+        '200':
+          description: FAQs.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FaqListResponse' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /support/tickets:
+    post:
+      tags: [Support]
+      operationId: createTicket
+      summary: Open a support ticket
+      x-client-status: planned
+      x-rate-limit: 5 per day
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateTicketRequest' }
+      responses:
+        '201':
+          description: Ticket created.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /support/tickets/{ticketId}:
+    get:
+      tags: [Support]
+      operationId: getTicket
+      summary: A ticket you opened
+      x-client-status: planned
+      parameters:
+        - name: ticketId
+          in: path
+          required: true
+          schema: { type: string, example: tkt_01HZX }
+      responses:
+        '200':
+          description: Ticket.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TicketResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /account/deletion-request:
+    post:
+      tags: [Account]
+      operationId: requestAccountDeletion
+      summary: Schedule account deletion
+      description: The profile is hidden immediately; data is erased after a 14-day grace period (signing in cancels). Active store subscriptions must be cancelled in the store; the response says so.
+      x-client-status: planned
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeletionRequest' }
+      responses:
+        '202':
+          description: Deletion scheduled.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeletionStatusResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /account/export-status:
+    get:
+      tags: [Account]
+      operationId: getExportStatus
+      summary: Status of the member's personal-data export
+      x-client-status: planned
+      responses:
+        '200':
+          description: Export status.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ExportStatusResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  # ───────────────────────────── Admin ─────────────────────────────
+  /admin/reports:
+    get:
+      tags: [Admin]
+      operationId: adminListReports
+      summary: Moderation queue
+      x-client-status: planned
+      x-required-role: MODERATOR
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ReportStatus' } }
+      responses:
+        '200':
+          description: A page of reports.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReportPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/reports/{reportId}:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateReport
+      summary: Triage or resolve a report
+      x-client-status: planned
+      x-required-role: MODERATOR
+      parameters:
+        - name: reportId
+          in: path
+          required: true
+          schema: { type: string, example: rep_01HZX }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminReportUpdate' }
+      responses:
+        '200':
+          description: Updated report.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminReportResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/users:
+    get:
+      tags: [Admin]
+      operationId: adminListUsers
+      summary: Search members
+      x-client-status: planned
+      x-required-role: MODERATOR
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - { name: q, in: query, description: Matches user ID or display name, schema: { type: string, maxLength: 100 } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/AccountStatus' } }
+      responses:
+        '200':
+          description: A page of members.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /admin/users/{userId}/status:
+    patch:
+      tags: [Admin]
+      operationId: adminUpdateUserStatus
+      summary: Warn, suspend, ban or reinstate a member
+      x-client-status: planned
+      x-required-role: MODERATOR (BANNED requires ADMIN)
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/AdminUserStatusUpdate' }
+      responses:
+        '200':
+          description: Updated member.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminUserResponse' }
+        '400': { $ref: '#/components/responses/ValidationError' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /admin/audit-logs:
+    get:
+      tags: [Admin]
+      operationId: adminListAuditLogs
+      summary: Audit trail of admin and moderator actions
+      x-client-status: planned
+      x-required-role: ADMIN
+      parameters:
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Limit'
+        - { name: actorId, in: query, schema: { type: string } }
+        - { name: targetId, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: A page of audit entries.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuditLogPageResponse' }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token from `/auth/otp/verify`, `/auth/login` or `/auth/token/refresh`. Lifetime 15 minutes.
+
+  parameters:
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque cursor from the previous page's `nextCursor`.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 20 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: UUID v4. Replays within 24 h return the original response; reusing a key with a different body returns `409 CONFLICT`.
+      schema: { type: string, format: uuid }
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema: { type: string, example: usr_01HZX }
+    MatchId:
+      name: matchId
+      in: path
+      required: true
+      schema: { type: string, example: mat_01HZX }
+    ConversationId:
+      name: conversationId
+      in: path
+      required: true
+      schema: { type: string, example: cnv_01HZX }
+    MessageId:
+      name: messageId
+      in: path
+      required: true
+      schema: { type: string, example: msg_01HZX }
+
+  responses:
+    OkEmpty:
+      description: Success with no payload.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/EmptyResponse' }
+    ValidationError:
+      description: Request failed validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: VALIDATION_ERROR, message: Please correct the highlighted fields., details: [{ field: displayName, reason: REQUIRED }] }, meta: { requestId: req_01HZA } }
+    Unauthenticated:
+      description: Missing, expired or revoked token. The client refreshes once, then signs out.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: UNAUTHENTICATED, message: Your session has expired., details: [] }, meta: { requestId: req_01HZB } }
+    Forbidden:
+      description: Authenticated but not allowed (e.g. missing role).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: FORBIDDEN, message: You do not have access to this., details: [] }, meta: { requestId: req_01HZC } }
+    AccountIneligible:
+      description: Under 18, banned, or region not supported.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: ACCOUNT_INELIGIBLE, message: This account is not eligible., details: [] }, meta: { requestId: req_01HZD } }
+    NotFound:
+      description: Resource does not exist or is not visible to the caller (including blocks).
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: NOT_FOUND, message: Not found., details: [] }, meta: { requestId: req_01HZE } }
+    Conflict:
+      description: State conflict, e.g. duplicate swipe or reused idempotency key with a different body.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: CONFLICT, message: You already responded to this profile., details: [] }, meta: { requestId: req_01HZF } }
+    MatchRequired:
+      description: Action requires an active match.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: MATCH_REQUIRED, message: You need to match before doing this., details: [] }, meta: { requestId: req_01HZG } }
+    SubscriptionRequired:
+      description: Action requires a premium entitlement or the free quota is used up.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: SUBSCRIPTION_REQUIRED, message: This needs a premium plan., details: [{ field: quota, reason: DAILY_LIKES_EXHAUSTED }] }, meta: { requestId: req_01HZH } }
+    MediaRejected:
+      description: Upload failed type/size validation or moderation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: MEDIA_REJECTED, message: This photo could not be accepted., details: [{ field: mediaId, reason: NO_FACE_DETECTED }] }, meta: { requestId: req_01HZI } }
+    RateLimited:
+      description: Too many requests.
+      headers:
+        Retry-After:
+          description: Seconds until the client may retry.
+          schema: { type: integer, example: 60 }
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: RATE_LIMITED, message: Too many attempts. Please wait and try again., details: [] }, meta: { requestId: req_01HZJ } }
+    FeatureNotConfigured:
+      description: The server does not have this integration configured.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: FEATURE_NOT_CONFIGURED, message: This feature is not available yet., details: [] }, meta: { requestId: req_01HZK } }
+    ServerError:
+      description: Unexpected server error. No stack traces or internals are ever returned.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+          example: { success: false, error: { code: SERVER_ERROR, message: Something went wrong on our side., details: [] }, meta: { requestId: req_01HZL } }
+
+  schemas:
+    # ── Envelope ──
+    Meta:
+      type: object
+      required: [requestId]
+      properties:
+        requestId: { type: string, example: req_01HZX9M2 }
+    SuccessEnvelope:
+      type: object
+      required: [success, meta]
+      properties:
+        success: { type: boolean, enum: [true] }
+        meta: { $ref: '#/components/schemas/Meta' }
+    ErrorCode:
+      type: string
+      enum: [VALIDATION_ERROR, UNAUTHENTICATED, FORBIDDEN, NOT_FOUND, CONFLICT, RATE_LIMITED, OTP_INVALID, OTP_EXPIRED, ACCOUNT_INELIGIBLE, USER_BLOCKED, MATCH_REQUIRED, SUBSCRIPTION_REQUIRED, MEDIA_REJECTED, NETWORK_ERROR, SERVER_ERROR, FEATURE_NOT_CONFIGURED]
+      description: '`NETWORK_ERROR` is client-generated and never sent by the server.'
+    FieldError:
+      type: object
+      required: [field, reason]
+      properties:
+        field: { type: string, example: displayName }
+        reason: { type: string, example: REQUIRED }
+    ErrorEnvelope:
+      type: object
+      required: [success, error, meta]
+      properties:
+        success: { type: boolean, enum: [false] }
+        error:
+          type: object
+          required: [code, message, details]
+          properties:
+            code: { $ref: '#/components/schemas/ErrorCode' }
+            message: { type: string, description: Safe to show to users. }
+            details:
+              type: array
+              items: { $ref: '#/components/schemas/FieldError' }
+        meta: { $ref: '#/components/schemas/Meta' }
+    EmptyResponse:
+      allOf:
+        - $ref: '#/components/schemas/SuccessEnvelope'
+        - type: object
+          properties:
+            data: { type: object, nullable: true, example: null }
+
+    # ── Auth ──
+    RegisterRequest:
+      type: object
+      required: [email, password, displayName, dateOfBirth, acceptedTermsVersion]
+      properties:
+        email: { type: string, format: email, example: alex@example.invalid }
+        password: { type: string, format: password, minLength: 10, maxLength: 128 }
+        displayName: { type: string, minLength: 1, maxLength: 40, example: Alex }
+        dateOfBirth: { type: string, format: date, example: '1997-03-14', description: Must be 18+; checked server-side. }
+        acceptedTermsVersion: { type: string, example: '2026-01' }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: alex@example.invalid }
+        password: { type: string, format: password }
+    OtpRequest:
+      type: object
+      required: [phoneNumber]
+      properties:
+        phoneNumber: { type: string, pattern: '^\+[1-9]\d{7,14}$', example: '+919876543210', description: E.164 }
+    OtpChallenge:
+      type: object
+      required: [expiresInSeconds, resendAfterSeconds]
+      properties:
+        expiresInSeconds: { type: integer, example: 300 }
+        resendAfterSeconds: { type: integer, example: 30 }
+    OtpVerifyRequest:
+      type: object
+      required: [phoneNumber, code]
+      properties:
+        phoneNumber: { type: string, example: '+919876543210' }
+        code: { type: string, pattern: '^\d{6}$', example: '123456' }
+    SocialLoginRequest:
+      type: object
+      required: [idToken]
+      properties:
+        idToken: { type: string, description: Provider-issued ID token. }
+        nonce: { type: string, description: Required for Apple. }
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken: { type: string, example: rt_9f8e7d }
+    AuthTokens:
+      type: object
+      required: [accessToken, refreshToken, expiresIn]
+      properties:
+        accessToken: { type: string, example: eyJhbGciOiJIUzI1NiJ9.demo.sig }
+        refreshToken: { type: string, example: rt_9f8e7d }
+        expiresIn: { type: integer, description: Access token lifetime in seconds., example: 900 }
+    AuthResult:
+      type: object
+      required: [user, tokens, isNewUser]
+      properties:
+        user:
+          type: object
+          required: [id, onboardingComplete]
+          properties:
+            id: { type: string, example: usr_01HZX }
+            onboardingComplete: { type: boolean, description: 'False until POST /profile/onboarding succeeds. The app routes to onboarding when false.', example: true }
+        isNewUser: { type: boolean, example: false }
+        tokens: { $ref: '#/components/schemas/AuthTokens' }
+
+    # ── Profile ──
+    Photo:
+      type: object
+      required: [id, url, order]
+      properties:
+        id: { type: string, example: pho_01HZX }
+        url: { type: string, format: uri, description: Signed CDN URL., example: 'https://cdn.example.invalid/p/usr_01HZX_0.jpg' }
+        order: { type: integer, minimum: 0, maximum: 5, example: 0 }
+        moderationStatus: { type: string, enum: [PENDING, APPROVED, REJECTED], description: Only present on your own photos. }
+    PublicProfile:
+      type: object
+      required: [id, displayName, age, photos, interests, isVerified]
+      properties:
+        id: { type: string, example: usr_01HZX }
+        displayName: { type: string, example: Avery }
+        age: { type: integer, minimum: 18, example: 29 }
+        bio: { type: string, maxLength: 500, example: 'Board-game host, sunrise hiker.' }
+        interests: { type: array, maxItems: 10, items: { type: string }, example: [Hiking, Coffee] }
+        photos: { type: array, maxItems: 6, items: { $ref: '#/components/schemas/Photo' } }
+        city: { type: string, example: Pune }
+        occupation: { type: string, nullable: true, maxLength: 80, description: Optional job title. Omitted or null when the member has not set one; the app hides the row., example: Game designer }
+        distanceKm: { type: integer, nullable: true, description: Rounded; null when location sharing is off., example: 3 }
+        isVerified: { type: boolean, example: true }
+        relationshipGoal: { $ref: '#/components/schemas/RelationshipGoal' }
+        basics: { $ref: '#/components/schemas/ProfileBasics' }
+        prompt: { $ref: '#/components/schemas/PromptAnswer' }
+    DatingPreferences:
+      type: object
+      required: [minAge, maxAge, maxDistanceKm, showMe]
+      properties:
+        minAge: { type: integer, minimum: 18, maximum: 99, example: 24 }
+        maxAge: { type: integer, minimum: 18, maximum: 99, example: 36 }
+        maxDistanceKm: { type: integer, minimum: 1, maximum: 500, example: 25 }
+        showMe: { type: string, enum: [WOMEN, MEN, EVERYONE], example: EVERYONE }
+    MyProfile:
+      allOf:
+        - $ref: '#/components/schemas/PublicProfile'
+        - type: object
+          required: [preferences, onboardingComplete]
+          properties:
+            phoneNumber: { type: string, nullable: true, example: '+919876543210' }
+            gender: { type: string, enum: [WOMAN, MAN, NON_BINARY], nullable: true, description: Null before onboarding. Not shown to other members. }
+            preferences: { $ref: '#/components/schemas/DatingPreferences' }
+            verificationStatus: { type: string, enum: [NONE, PENDING, VERIFIED, REJECTED] }
+            onboardingComplete: { type: boolean, description: Read by the app when restoring a session. }
+    ProfileUpdateRequest:
+      type: object
+      minProperties: 1
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 40 }
+        bio: { type: string, maxLength: 500 }
+        interests: { type: array, minItems: 1, maxItems: 10, items: { type: string } }
+        city: { type: string, maxLength: 80 }
+        occupation: { type: string, nullable: true, maxLength: 80, description: Empty string or null clears it. }
+      example: { bio: 'Product designer. Weekend trail runner.' }
+    OnboardingRequest:
+      type: object
+      required: [displayName, dateOfBirth, gender, showGender, showMe, maxDistanceKm, relationshipGoal, interestIds, photoMediaIds, acceptedTermsVersion]
+      properties:
+        displayName: { type: string, minLength: 1, maxLength: 40, example: Sam }
+        dateOfBirth: { type: string, format: date, description: 'Stored privately; only the derived age is public. Members under 18 are rejected with 403 ACCOUNT_INELIGIBLE.', example: '1998-02-14' }
+        gender: { type: string, enum: [WOMAN, MAN, NON_BINARY], example: NON_BINARY }
+        showGender: { type: boolean, description: Whether other members see the gender on the profile., example: true }
+        showMe: { type: string, enum: [WOMEN, MEN, EVERYONE], example: WOMEN }
+        maxDistanceKm: { type: integer, minimum: 1, maximum: 500, description: 'Initial discovery radius. The app offers 1–160.', example: 80 }
+        relationshipGoal: { $ref: '#/components/schemas/RelationshipGoal' }
+        interestIds: { type: array, minItems: 1, maxItems: 10, uniqueItems: true, items: { type: string }, example: [int_hiking, int_coffee] }
+        photoMediaIds:
+          type: array
+          minItems: 2
+          maxItems: 6
+          uniqueItems: true
+          items: { type: string }
+          description: 'Media ids from `/media/complete` (purpose PROFILE_PHOTO), in display order. Unknown, foreign or REJECTED ids fail with 400 VALIDATION_ERROR.'
+          example: [med_01HZX, med_01HZY]
+        basics: { $ref: '#/components/schemas/ProfileBasics' }
+        bio: { type: string, maxLength: 500, description: Omitted when empty., example: 'Coffee first, then adventures.' }
+        prompt: { $ref: '#/components/schemas/PromptAnswer' }
+        location:
+          type: object
+          description: 'Approximate position (the app rounds to 2 decimals, about 1 km). Omitted when the member does not share a location. Used for city and distances; never shown to others.'
+          required: [latitude, longitude]
+          properties:
+            latitude: { type: number, minimum: -90, maximum: 90, example: 18.52 }
+            longitude: { type: number, minimum: -180, maximum: 180, example: 73.86 }
+        acceptedTermsVersion: { type: string, description: Version of the Terms and Privacy Policy the member accepted. Must be the current version., example: '2026-01' }
+    RelationshipGoal:
+      type: string
+      enum: [LONG_TERM, LONG_TERM_OPEN_TO_SHORT, SHORT_TERM_OPEN_TO_LONG, SHORT_TERM_FUN, NEW_FRIENDS, STILL_FIGURING_OUT]
+      example: LONG_TERM
+    ProfileBasics:
+      type: object
+      description: Optional single-choice answers. Every key is optional; clients ignore unknown keys and values.
+      properties:
+        drinking: { type: string, enum: [NOT_FOR_ME, SOBER, SOBER_CURIOUS, SPECIAL_OCCASIONS, SOCIAL_WEEKENDS, MOST_NIGHTS] }
+        smoking: { type: string, enum: [SOCIAL, WHEN_DRINKING, NON_SMOKER, SMOKER, TRYING_TO_QUIT] }
+        workout: { type: string, enum: [EVERYDAY, OFTEN, SOMETIMES, NEVER] }
+        pets: { type: string, enum: [DOG, CAT, BIRD, FISH, REPTILE, OTHER, NONE_BUT_LOVE, WANT, ALLERGIC] }
+        communicationStyle: { type: string, enum: [ALWAYS_ONLINE, BIG_TEXTER, PHONE_CALLER, VIDEO_CHATTER, SLOW_REPLIER, BAD_TEXTER, IN_PERSON] }
+        loveStyle: { type: string, enum: [GESTURES, PRESENTS, TOUCH, COMPLIMENTS, TIME_TOGETHER] }
+        education: { type: string, enum: [HIGH_SCHOOL, IN_COLLEGE, BACHELORS, IN_GRAD_SCHOOL, MASTERS, PHD, TRADE_SCHOOL] }
+        zodiac: { type: string, enum: [ARIES, TAURUS, GEMINI, CANCER, LEO, VIRGO, LIBRA, SCORPIO, SAGITTARIUS, CAPRICORN, AQUARIUS, PISCES] }
+      additionalProperties: false
+      example: { drinking: SOBER, workout: OFTEN }
+    PromptAnswer:
+      type: object
+      required: [promptId, answer]
+      properties:
+        promptId: { type: string, enum: [SIMPLE_PLEASURES, PERFECT_SUNDAY, TOGETHER_WE_COULD, GREEN_FLAG, FIRST_DATE, TWO_TRUTHS], example: GREEN_FLAG }
+        answer: { type: string, minLength: 1, maxLength: 150, example: 'Kindness to waiters.' }
+    Interest:
+      type: object
+      required: [id, label, category]
+      properties:
+        id: { type: string, example: int_hiking }
+        label: { type: string, example: Hiking }
+        category: { type: string, example: Outdoors }
+    SetInterestsRequest:
+      type: object
+      required: [interestIds]
+      properties:
+        interestIds: { type: array, minItems: 1, maxItems: 10, items: { type: string }, example: [int_hiking, int_coffee] }
+    AddPhotoRequest:
+      type: object
+      required: [mediaId]
+      properties:
+        mediaId: { type: string, example: med_01HZX }
+    PhotoOrderRequest:
+      type: object
+      required: [photoIds]
+      properties:
+        photoIds: { type: array, minItems: 1, maxItems: 6, items: { type: string }, example: [pho_2, pho_1] }
+    VerificationRequest:
+      type: object
+      required: [selfieMediaId]
+      properties:
+        selfieMediaId: { type: string, example: med_01HZS }
+    VerificationStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [NONE, PENDING, VERIFIED, REJECTED], example: PENDING }
+        submittedAt: { type: string, format: date-time }
+
+    # ── Media ──
+    UploadUrlRequest:
+      type: object
+      required: [purpose, contentType, sizeBytes]
+      properties:
+        purpose: { type: string, enum: [PROFILE_PHOTO, VERIFICATION_SELFIE, CHAT_ATTACHMENT], example: PROFILE_PHOTO }
+        contentType: { type: string, enum: [image/jpeg, image/png, image/heic, image/webp], example: image/jpeg }
+        sizeBytes: { type: integer, minimum: 1, maximum: 10485760, example: 2048000 }
+    UploadUrl:
+      type: object
+      required: [mediaId, uploadUrl, method, headers, expiresAt]
+      properties:
+        mediaId: { type: string, example: med_01HZX }
+        uploadUrl: { type: string, format: uri, example: 'https://storage.example.invalid/upload/med_01HZX?sig=...' }
+        method: { type: string, enum: [PUT], example: PUT }
+        headers: { type: object, additionalProperties: { type: string }, example: { Content-Type: image/jpeg } }
+        expiresAt: { type: string, format: date-time }
+    MediaCompleteRequest:
+      type: object
+      required: [mediaId]
+      properties:
+        mediaId: { type: string, example: med_01HZX }
+    Media:
+      type: object
+      required: [id, status, contentType]
+      properties:
+        id: { type: string, example: med_01HZX }
+        status: { type: string, enum: [UPLOADING, PENDING_REVIEW, APPROVED, REJECTED], example: PENDING_REVIEW }
+        contentType: { type: string, example: image/jpeg }
+        url: { type: string, format: uri, nullable: true, description: 'Signed read URL, valid 1 h.' }
+
+    # ── Discovery / swipes ──
+    SwipeAction:
+      type: string
+      enum: [LIKE, PASS, SUPER_LIKE]
+    SwipeRequest:
+      type: object
+      required: [targetUserId, action]
+      properties:
+        targetUserId: { type: string, example: usr_01HZX }
+        action: { $ref: '#/components/schemas/SwipeAction' }
+    SwipeResult:
+      type: object
+      required: [swipeId, isMatch]
+      properties:
+        swipeId: { type: string, example: swp_01HZX }
+        isMatch: { type: boolean, example: true }
+        match:
+          type: object
+          allOf: [{ $ref: '#/components/schemas/Match' }]
+          nullable: true
+    UndoResult:
+      type: object
+      required: [restoredProfile]
+      properties:
+        restoredProfile: { $ref: '#/components/schemas/PublicProfile' }
+    Like:
+      type: object
+      required: [user, action, likedAt]
+      properties:
+        user: { $ref: '#/components/schemas/PublicProfile' }
+        action: { type: string, enum: [LIKE, SUPER_LIKE] }
+        likedAt: { type: string, format: date-time }
+
+    # ── Matches / chat ──
+    Match:
+      type: object
+      required: [id, otherUser, matchedAt, conversationId]
+      properties:
+        id: { type: string, example: mat_01HZX }
+        otherUser: { $ref: '#/components/schemas/PublicProfile' }
+        matchedAt: { type: string, format: date-time, example: '2026-01-15T12:00:00.000Z' }
+        conversationId: { type: string, example: cnv_01HZX }
+    Message:
+      type: object
+      required: [id, conversationId, senderId, text, sentAt, status]
+      properties:
+        id: { type: string, example: msg_01HZX }
+        conversationId: { type: string, example: cnv_01HZX }
+        senderId: { type: string, example: usr_me }
+        text: { type: string, minLength: 1, maxLength: 1000, example: 'Saturday afternoon?' }
+        sentAt: { type: string, format: date-time, example: '2026-01-15T12:05:00.000Z' }
+        status: { type: string, enum: [SENT, DELIVERED, READ], example: SENT }
+        clientMessageId: { type: string, nullable: true, example: 3f1c2a9e-1d2b-4c5e-9f00-123456789abc }
+    Conversation:
+      type: object
+      required: [id, matchId, otherUser, unreadCount]
+      properties:
+        id: { type: string, example: cnv_01HZX }
+        matchId: { type: string, example: mat_01HZX }
+        otherUser: { $ref: '#/components/schemas/PublicProfile' }
+        lastMessage:
+          type: object
+          allOf: [{ $ref: '#/components/schemas/Message' }]
+          nullable: true
+        unreadCount: { type: integer, minimum: 0, example: 1 }
+    SendMessageRequest:
+      type: object
+      required: [text, clientMessageId]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 1000, example: 'Hi Avery!' }
+        clientMessageId: { type: string, format: uuid }
+
+    # ── Safety ──
+    ReportReason:
+      type: string
+      enum: [FAKE_PROFILE, INAPPROPRIATE_PHOTOS, HARASSMENT, SPAM_OR_SCAM, UNDERAGE, OFFLINE_BEHAVIOUR, OTHER]
+    ReportRequest:
+      type: object
+      required: [targetType, targetId, reason]
+      properties:
+        targetType: { type: string, enum: [USER, PHOTO] }
+        targetId: { type: string, example: usr_01HZX }
+        reason: { $ref: '#/components/schemas/ReportReason' }
+        details: { type: string, maxLength: 1000 }
+        alsoBlock: { type: boolean, default: true }
+    MessageReportRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason: { $ref: '#/components/schemas/ReportReason' }
+        details: { type: string, maxLength: 1000 }
+        alsoBlock: { type: boolean, default: true }
+    ReportStatus:
+      type: string
+      enum: [OPEN, IN_REVIEW, ACTIONED, DISMISSED]
+    Report:
+      type: object
+      required: [id, status, createdAt]
+      properties:
+        id: { type: string, example: rep_01HZX }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        createdAt: { type: string, format: date-time }
+    Block:
+      type: object
+      required: [user, blockedAt]
+      properties:
+        user:
+          type: object
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        blockedAt: { type: string, format: date-time }
+
+    # ── Notifications ──
+    DeviceRegistration:
+      type: object
+      required: [platform, pushToken]
+      properties:
+        platform: { type: string, enum: [IOS, ANDROID] }
+        pushToken: { type: string, description: FCM registration token. }
+        appVersion: { type: string, example: 1.0.0+1 }
+        locale: { type: string, example: en-IN }
+    Device:
+      type: object
+      required: [id, platform]
+      properties:
+        id: { type: string, example: dev_01HZX }
+        platform: { type: string, enum: [IOS, ANDROID] }
+        lastSeenAt: { type: string, format: date-time }
+    Notification:
+      type: object
+      required: [id, type, title, createdAt]
+      properties:
+        id: { type: string, example: ntf_01HZX }
+        type: { type: string, enum: [NEW_MATCH, NEW_MESSAGE, NEW_LIKE, VERIFICATION_RESULT, SYSTEM] }
+        title: { type: string, example: "It's a match!" }
+        body: { type: string, example: You and Avery like each other. }
+        data: { type: object, additionalProperties: { type: string }, example: { matchId: mat_01HZX } }
+        createdAt: { type: string, format: date-time }
+        readAt: { type: string, format: date-time, nullable: true }
+    NotificationPreferences:
+      type: object
+      properties:
+        newMatches: { type: boolean, example: true }
+        messages: { type: boolean, example: true }
+        likes: { type: boolean, example: true }
+        promotions: { type: boolean, example: false }
+
+    # ── Subscriptions ──
+    Product:
+      type: object
+      required: [id, tier, title, priceLabel, period]
+      properties:
+        id: { type: string, description: Store product ID., example: dc_plus_monthly }
+        tier: { type: string, enum: [PLUS, PREMIUM], example: PLUS }
+        title: { type: string, example: Plus }
+        description: { type: string, example: Unlimited likes and undo. }
+        priceLabel: { type: string, description: Display only; the store sheet shows the authoritative price., example: '₹499' }
+        period: { type: string, enum: [WEEKLY, MONTHLY, YEARLY], example: MONTHLY }
+    Entitlement:
+      type: object
+      required: [tier, isActive]
+      properties:
+        tier: { type: string, enum: [FREE, PLUS, PREMIUM], example: PLUS }
+        isActive: { type: boolean, example: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+        willRenew: { type: boolean, example: true }
+        platform: { type: string, enum: [IOS, ANDROID], nullable: true }
+    VerifyPurchaseRequest:
+      type: object
+      required: [platform, productId, transactionProof]
+      properties:
+        platform: { type: string, enum: [IOS, ANDROID] }
+        productId: { type: string, example: dc_plus_monthly }
+        transactionProof: { type: string, description: App Store signed transaction (JWS) or Play purchase token. }
+    RestorePurchasesRequest:
+      type: object
+      required: [platform, transactionProofs]
+      properties:
+        platform: { type: string, enum: [IOS, ANDROID] }
+        transactionProofs: { type: array, minItems: 1, maxItems: 20, items: { type: string } }
+
+    # ── Support / account ──
+    Faq:
+      type: object
+      required: [id, question, answer]
+      properties:
+        id: { type: string, example: faq_safety_1 }
+        category: { type: string, example: Safety }
+        question: { type: string, example: How do I report someone? }
+        answer: { type: string, example: 'Open their profile, tap the menu, then Report.' }
+    CreateTicketRequest:
+      type: object
+      required: [category, subject, message]
+      properties:
+        category: { type: string, enum: [ACCOUNT, BILLING, SAFETY, BUG, OTHER] }
+        subject: { type: string, minLength: 3, maxLength: 120 }
+        message: { type: string, minLength: 10, maxLength: 5000 }
+    Ticket:
+      type: object
+      required: [id, category, subject, status, createdAt]
+      properties:
+        id: { type: string, example: tkt_01HZX }
+        category: { type: string, example: BILLING }
+        subject: { type: string, example: Charged twice }
+        status: { type: string, enum: [OPEN, WAITING_ON_MEMBER, RESOLVED, CLOSED] }
+        createdAt: { type: string, format: date-time }
+        messages:
+          type: array
+          items:
+            type: object
+            required: [from, body, sentAt]
+            properties:
+              from: { type: string, enum: [MEMBER, SUPPORT] }
+              body: { type: string }
+              sentAt: { type: string, format: date-time }
+    DeletionRequest:
+      type: object
+      required: [confirm]
+      properties:
+        confirm: { type: boolean, enum: [true] }
+        reason: { type: string, enum: [FOUND_SOMEONE, NOT_USEFUL, PRIVACY, OTHER] }
+        feedback: { type: string, maxLength: 1000 }
+    DeletionStatus:
+      type: object
+      required: [status, scheduledFor]
+      properties:
+        status: { type: string, enum: [SCHEDULED], example: SCHEDULED }
+        scheduledFor: { type: string, format: date-time }
+        activeStoreSubscription: { type: boolean, description: 'If true, tell the member to cancel in the App Store / Play Store.' }
+    ExportStatus:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [NONE, PREPARING, READY, EXPIRED], example: READY }
+        downloadUrl: { type: string, format: uri, nullable: true }
+        expiresAt: { type: string, format: date-time, nullable: true }
+
+    # ── Admin ──
+    AccountStatus:
+      type: string
+      enum: [ACTIVE, WARNED, SUSPENDED, BANNED, PENDING_DELETION]
+    AdminReport:
+      type: object
+      required: [id, reporterId, targetType, targetId, reason, status, createdAt]
+      properties:
+        id: { type: string, example: rep_01HZX }
+        reporterId: { type: string }
+        targetType: { type: string, enum: [USER, PHOTO, MESSAGE] }
+        targetId: { type: string }
+        reason: { $ref: '#/components/schemas/ReportReason' }
+        details: { type: string }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        assignedTo: { type: string, nullable: true }
+        createdAt: { type: string, format: date-time }
+    AdminReportUpdate:
+      type: object
+      required: [status]
+      properties:
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        resolutionNote: { type: string, maxLength: 2000 }
+        assignToMe: { type: boolean }
+    AdminUser:
+      type: object
+      required: [id, displayName, status, createdAt]
+      properties:
+        id: { type: string }
+        displayName: { type: string }
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        reportsAgainstCount: { type: integer }
+        createdAt: { type: string, format: date-time }
+    AdminUserStatusUpdate:
+      type: object
+      required: [status, reason]
+      properties:
+        status: { $ref: '#/components/schemas/AccountStatus' }
+        reason: { type: string, minLength: 5, maxLength: 2000 }
+        until: { type: string, format: date-time, nullable: true, description: Required for SUSPENDED. }
+    AuditLogEntry:
+      type: object
+      required: [id, actorId, action, targetType, targetId, createdAt]
+      properties:
+        id: { type: string }
+        actorId: { type: string }
+        action: { type: string, example: USER_SUSPENDED }
+        targetType: { type: string, example: USER }
+        targetId: { type: string }
+        metadata: { type: object, additionalProperties: true }
+        createdAt: { type: string, format: date-time }
+
+    # ── Pages ──
+    PageBase:
+      type: object
+      required: [nextCursor]
+      properties:
+        nextCursor: { type: string, nullable: true, example: eyJvIjoxMH0 }
+
+    # ── Response envelopes (success + typed data) ──
+    AuthResultResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/AuthResult' } } }]
+    AuthTokensResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/AuthTokens' } } }]
+    OtpChallengeResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/OtpChallenge' } } }]
+    MyProfileResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/MyProfile' } } }]
+    PublicProfileResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/PublicProfile' } } }]
+    DatingPreferencesResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/DatingPreferences' } } }]
+    InterestListResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Interest' } } } } } }]
+    VerificationStatusResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/VerificationStatus' } } }]
+    UploadUrlResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/UploadUrl' } } }]
+    MediaResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Media' } } }]
+    PublicProfilePageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/PublicProfile' } } } }] } } }]
+    SwipeResultResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/SwipeResult' } } }]
+    UndoResultResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/UndoResult' } } }]
+    LikePageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Like' } } } }] } } }]
+    MatchResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Match' } } }]
+    MatchPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Match' } } } }] } } }]
+    ConversationResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Conversation' } } }]
+    ConversationPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Conversation' } } } }] } } }]
+    MessageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Message' } } }]
+    MessagePageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Message' } } } }] } } }]
+    ReportResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Report' } } }]
+    BlockPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Block' } } } }] } } }]
+    DeviceResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Device' } } }]
+    NotificationPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Notification' } } } }] } } }]
+    NotificationPreferencesResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/NotificationPreferences' } } }]
+    ProductListResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Product' } } } } } }]
+    EntitlementResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Entitlement' } } }]
+    FaqListResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/Faq' } } } } } }]
+    TicketResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/Ticket' } } }]
+    DeletionStatusResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/DeletionStatus' } } }]
+    ExportStatusResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/ExportStatus' } } }]
+    AdminReportResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/AdminReport' } } }]
+    AdminReportPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminReport' } } } }] } } }]
+    AdminUserResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { $ref: '#/components/schemas/AdminUser' } } }]
+    AdminUserPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AdminUser' } } } }] } } }]
+    AuditLogPageResponse:
+      allOf: [{ $ref: '#/components/schemas/SuccessEnvelope' }, { type: object, required: [data], properties: { data: { allOf: [{ $ref: '#/components/schemas/PageBase' }, { type: object, required: [items], properties: { items: { type: array, items: { $ref: '#/components/schemas/AuditLogEntry' } } } }] } } }]

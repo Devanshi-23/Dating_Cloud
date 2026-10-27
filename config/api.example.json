@@ -1,0 +1,6 @@
+{
+  "APP_ENV": "development",
+  "DATA_MODE": "api",
+  "API_BASE_URL": "https://figure-cancel-snowiness.ngrok-free.dev/api/v1",
+  "SOCKET_BASE_URL": "https://figure-cancel-snowiness.ngrok-free.dev"
+}

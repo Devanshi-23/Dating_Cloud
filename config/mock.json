@@ -1,0 +1,5 @@
+{
+  "APP_ENV": "development",
+  "DATA_MODE": "mock",
+  "MOCK_LATENCY_MS": 600
+}
