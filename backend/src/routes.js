@@ -4,11 +4,60 @@ import { config } from './config.js';
 import { registerAdmin } from './admin-routes.js';
 import { registerExtended } from './extended-routes.js';
 import { fail, ok } from './http.js';
-import { emitToUsers } from './realtime-hub.js';
+import { emitToUsers, isUserOnline } from './realtime-hub.js';
 import { blankMemberAccount, createId, createStore } from './store.js';
 
 const imageTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
 const mediaPurposes = new Set(['PROFILE_PHOTO', 'VERIFICATION_SELFIE', 'CHAT_ATTACHMENT']);
+
+function readBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        reject(Object.assign(new Error('too large'), { type: 'entity.too.large' }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
+function parseMultipart(buffer, contentType) {
+  const match = /boundary=(?:"([^"]+)"|([^;]+))/i.exec(contentType || '');
+  if (!match) return null;
+  const boundary = Buffer.from(`--${(match[1] || match[2]).trim()}`);
+  const fields = {};
+  let file = null;
+  let start = buffer.indexOf(boundary);
+  while (start !== -1) {
+    const next = buffer.indexOf(boundary, start + boundary.length);
+    if (next === -1) break;
+    let part = buffer.subarray(start + boundary.length, next);
+    if (part.subarray(0, 2).equals(Buffer.from('\r\n'))) part = part.subarray(2);
+    if (part.subarray(-2).equals(Buffer.from('\r\n'))) part = part.subarray(0, -2);
+    const split = part.indexOf(Buffer.from('\r\n\r\n'));
+    if (split !== -1) {
+      const headers = part.subarray(0, split).toString('utf8');
+      const body = part.subarray(split + 4);
+      const name = /name="([^"]+)"/.exec(headers)?.[1];
+      const filename = /filename="([^"]*)"/.exec(headers)?.[1];
+      const type = /Content-Type:\s*([^\r\n]+)/i.exec(headers)?.[1]?.trim();
+      if (name && filename != null) {
+        file = { mimetype: type || 'application/octet-stream', buffer: body };
+      } else if (name) {
+        fields[name] = body.toString('utf8');
+      }
+    }
+    start = next;
+  }
+  return { fields, file };
+}
 
 export const store = createStore();
 const phonePattern = /^\+[1-9]\d{7,14}$/;
@@ -221,7 +270,10 @@ function conversationJson(user, conversation) {
   return {
     id: conversation.id,
     matchId: conversation.matchId,
-    otherUser: publicProfile(findPerson(otherId)),
+    otherUser: {
+      ...publicProfile(findPerson(otherId)),
+      isOnline: isUserOnline(otherId),
+    },
     lastMessage: lastMessage(conversation.id),
     unreadCount: store.messages.filter(
       (message) =>
@@ -348,6 +400,42 @@ export function registerRoutes(app) {
 
   router.get('/interests', requireAuth, (_req, res) => {
     ok(res, { items: store.interests });
+  });
+
+  router.post('/media/upload', requireAuth, async (req, res) => {
+    let raw;
+    try {
+      raw = await readBody(req, 8_000_000);
+    } catch {
+      return fail(res, 'MEDIA_REJECTED', 'That photo can’t be used. Choose another one.', [
+        { field: 'file', reason: 'TOO_LARGE' },
+      ]);
+    }
+    const parsed = parseMultipart(raw, req.get('content-type'));
+    const purpose = parsed?.fields?.purpose;
+    const file = parsed?.file;
+    if (!mediaPurposes.has(purpose)) {
+      return fail(res, 'VALIDATION_ERROR', 'Please correct the highlighted fields.', [
+        { field: 'purpose', reason: 'UNSUPPORTED' },
+      ]);
+    }
+    if (!file || !imageTypes.has(file.mimetype) || file.buffer.length < 1) {
+      return fail(res, 'MEDIA_REJECTED', 'That photo can’t be used. Choose another one.', [
+        { field: 'file', reason: 'UNSUPPORTED_TYPE' },
+      ]);
+    }
+    const mediaId = createId('med');
+    store.media.set(mediaId, {
+      id: mediaId,
+      ownerId: req.user.id,
+      purpose,
+      contentType: file.mimetype,
+      sizeBytes: file.buffer.length,
+      bytes: file.buffer,
+      status: 'READY',
+    });
+    const url = `${req.protocol}://${req.get('host')}/api/v1/media/files/${mediaId}`;
+    return ok(res, { mediaId, status: 'READY', url }, 201);
   });
 
   router.post('/media/upload-url', requireAuth, (req, res) => {
@@ -547,12 +635,21 @@ export function registerRoutes(app) {
       req.user.bio = text;
     }
     if (labels != null) {
-      if (!Array.isArray(labels) || labels.length > 10) {
+      if (!Array.isArray(labels) || labels.length < 1 || labels.length > 10) {
         return fail(res, 'VALIDATION_ERROR', 'Please correct the highlighted fields.', [
           { field: 'interests', reason: 'COUNT_1_10' },
         ]);
       }
       req.user.interests = labels.map(String);
+    }
+    if (req.body?.basics != null) {
+      const basics = req.body.basics;
+      if (typeof basics !== 'object' || Array.isArray(basics)) {
+        return fail(res, 'VALIDATION_ERROR', 'Please correct the highlighted fields.', [
+          { field: 'basics', reason: 'INVALID' },
+        ]);
+      }
+      req.user.basics = basics;
     }
     return ok(res, myProfile(req.user));
   });

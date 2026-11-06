@@ -61,4 +61,19 @@ class ApiChatRepository implements ChatRepository {
   Future<void> markRead(String messageId) async {
     await _client.post(ApiEndpoints.messageRead(messageId));
   }
+
+  @override
+  Future<void> deleteConversation(String conversationId) async {
+    await _client.delete(ApiEndpoints.conversation(conversationId));
+  }
+
+  @override
+  Future<void> deleteMessageForMe(String messageId) async {
+    await _client.delete(ApiEndpoints.message(messageId));
+  }
+
+  @override
+  Future<Message> unsendMessage(String messageId) async => MessageDto.fromJson(
+    asJson(await _client.post(ApiEndpoints.messageUnsend(messageId))),
+  );
 }

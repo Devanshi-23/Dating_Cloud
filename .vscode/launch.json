@@ -6,7 +6,7 @@
       "request": "launch",
       "type": "dart",
       "program": "lib/main.dart",
-      "args": ["--dart-define-from-file=config/api.local.json"]
+      "args": ["--dart-define-from-file=.env"]
     },
     {
       "name": "Dating Cloud (mock)",

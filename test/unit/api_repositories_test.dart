@@ -2,7 +2,6 @@ import 'package:datingcloud/core/di/core_providers.dart';
 import 'package:datingcloud/core/di/repository_providers.dart';
 import 'package:datingcloud/core/errors/failure.dart';
 import 'package:datingcloud/core/network/api_client.dart';
-import 'package:datingcloud/core/network/auth_interceptor.dart';
 import 'package:datingcloud/core/storage/secure_storage_service.dart';
 import 'package:datingcloud/app/config/app_config.dart';
 import 'package:datingcloud/features/auth/data/repositories/api_auth_repository.dart';
@@ -392,47 +391,29 @@ void main() {
     );
 
     test(
-      'asks for an upload URL, PUTs the bytes, then completes',
+      'posts the file to /media/upload with purpose PROFILE_PHOTO',
       () async {
-        final adapter = FakeHttpAdapter((options) {
-          if (options.method == 'PUT') {
-            return ResponseBody.fromString('', 200);
-          }
-          if (options.uri.path.endsWith('/media/complete')) {
-            return ok({
-              'id': 'med_9',
-              'status': 'PENDING_REVIEW',
-              'contentType': 'image/jpeg',
-              'url': 'https://cdn.test.invalid/uploads/med_9.jpg',
-            });
-          }
-          return ok({
+        final adapter = FakeHttpAdapter(
+          (_) => ok({
             'mediaId': 'med_9',
-            'uploadUrl': 'https://cdn.test.invalid/uploads/med_9.jpg',
-            'method': 'PUT',
-            'headers': {'Content-Type': 'image/jpeg'},
-            'expiresAt': '2026-10-27T12:15:00.000Z',
-          });
-        });
+            'url': 'https://cdn.test.invalid/uploads/med_9.jpg',
+          }),
+        );
         final uploaded = await onboardingRepo(adapter).uploadPhoto(image);
 
         expect(uploaded.mediaId, 'med_9');
         expect(uploaded.previewPath, image.path);
-        expect(adapter.requests, hasLength(3));
-        final ticket = adapter.requests[0];
-        expect(ticket.method, 'POST');
-        expect(ticket.uri.path, '/api/v1/media/upload-url');
-        expect(ticket.data, {
-          'purpose': 'PROFILE_PHOTO',
-          'contentType': 'image/jpeg',
-          'sizeBytes': 3,
-        });
-        final put = adapter.requests[1];
-        expect(put.method, 'PUT');
-        expect(put.uri.toString(), 'https://cdn.test.invalid/uploads/med_9.jpg');
-        expect(put.extra[AuthInterceptor.skipAuthKey], isTrue);
-        expect(adapter.requests[2].uri.path, '/api/v1/media/complete');
-        expect(adapter.requests[2].data, {'mediaId': 'med_9'});
+        final request = adapter.requests.single;
+        expect(request.method, 'POST');
+        expect(request.uri.path, '/api/v1/media/upload');
+        final form = request.data as FormData;
+        expect(form.fields.map((entry) => entry.key).toList(), contains('purpose'));
+        expect(
+          form.fields.map((entry) => entry.value).toList(),
+          contains('PROFILE_PHOTO'),
+        );
+        expect(form.files.single.key, 'file');
+        expect(form.files.single.value.filename, 'pic.jpg');
       },
     );
 

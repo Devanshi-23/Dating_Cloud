@@ -1,9 +1,7 @@
 # Dating Cloud API Reference
 
-> **Status: PROPOSED — NOT IMPLEMENTED.** There is no backend for this
-> project yet. This document and [`openapi.yaml`](openapi.yaml) define the
-> contract the Flutter `Api*Repository` classes are written against. When a
-> backend is built, update both files from the real routes and tests.
+> For the **running local Node backend** (`backend/`), Postman steps, and the
+> full live route list, use [`backend_api.md`](backend_api.md).
 
 - Machine-readable spec: [`openapi.yaml`](openapi.yaml) (validated with
   `npx @redocly/cli lint docs/api/openapi.yaml`)

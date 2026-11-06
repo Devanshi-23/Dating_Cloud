@@ -2,14 +2,20 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router/route_names.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
+import '../../../../core/di/repository_providers.dart';
 import '../../../../core/realtime/chat_socket.dart';
+import '../../../../core/realtime/presence.dart';
 import '../../../../core/widgets/async_value_view.dart';
 import '../../../../core/widgets/profile_avatar.dart';
+import '../../../discovery/presentation/widgets/profile_card.dart';
 import '../../../onboarding/data/services/photo_picker.dart';
 import '../../../settings/presentation/account_sheets.dart';
+import '../../data/services/save_chat_photo.dart';
 import '../../domain/entities/chat.dart';
 import '../../domain/repositories/chat_repository.dart';
 import '../viewmodels/conversation_view_model.dart';
@@ -98,11 +104,155 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     }
   }
 
+  Future<void> _openProfile() async {
+    final other = ref
+        .read(conversationViewModelProvider(widget.conversationId))
+        .value
+        ?.conversation
+        .otherUser;
+    if (other == null || !mounted) return;
+    var profile = other;
+    try {
+      profile = await ref.read(profileRepositoryProvider).getProfile(other.id);
+    } catch (_) {}
+    if (!mounted) return;
+    await ProfileDetailsSheet.show(
+      context,
+      profile,
+      onBlock: () =>
+          blockMember(context, ref, profile.id, profile.displayName),
+      onReport: () => reportMember(context, ref, userId: profile.id),
+    );
+  }
+
+  Future<void> _confirmDeleteChat() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete chat?'),
+        content: const Text(
+          'This removes the conversation for you only. The other person '
+          'will still see it.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final provider = conversationViewModelProvider(widget.conversationId);
+    final failure = await ref.read(provider.notifier).deleteConversation();
+    if (!mounted) return;
+    if (failure != null) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(failure.message)));
+      return;
+    }
+    context.go(RoutePaths.chats);
+  }
+
+  Future<void> _onMessageActions(Message message, {required bool isMine}) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (message.attachment != null && !message.isUnsent)
+              ListTile(
+                leading: const Icon(Icons.download_rounded),
+                title: const Text('Save photo'),
+                onTap: () => Navigator.pop(context, 'save'),
+              ),
+            if (isMine && !message.isUnsent)
+              ListTile(
+                leading: const Icon(Icons.undo_rounded),
+                title: const Text('Delete for everyone'),
+                onTap: () => Navigator.pop(context, 'unsend'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline_rounded),
+              title: const Text('Delete for me'),
+              onTap: () => Navigator.pop(context, 'delete_me'),
+            ),
+            if (!isMine && !message.isUnsent)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('Report'),
+                onTap: () => Navigator.pop(context, 'report'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.close_rounded),
+              title: const Text('Cancel'),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    final provider = conversationViewModelProvider(widget.conversationId);
+    final notifier = ref.read(provider.notifier);
+    if (action == 'save') {
+      final url = message.attachment?.url;
+      if (url == null) return;
+      try {
+        await saveChatPhoto(url);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Photo saved')),
+        );
+      } on Object catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error'.replaceFirst('Bad state: ', ''))),
+        );
+      }
+      return;
+    }
+    if (action == 'report') {
+      final other = ref.read(provider).value?.conversation.otherUser;
+      if (other == null) return;
+      await reportMember(
+        context,
+        ref,
+        userId: other.id,
+        messageId: message.id,
+      );
+      return;
+    }
+    final failure = switch (action) {
+      'unsend' => await notifier.unsendMessage(message.id),
+      'delete_me' => await notifier.deleteMessageForMe(message.id),
+      _ => null,
+    };
+    if (!mounted || failure == null) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(failure.message)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = conversationViewModelProvider(widget.conversationId);
     final value = ref.watch(provider);
     final other = value.value?.conversation.otherUser;
+    final typing = value.value?.otherIsTyping ?? false;
+    final online = other == null ? null : ref.watch(presenceProvider)[other.id];
+    final status = typing
+        ? 'typing…'
+        : switch (online) {
+            true => 'Online',
+            false => 'Offline',
+            null => null,
+          };
 
     final theme = Theme.of(context);
     return Scaffold(
@@ -115,13 +265,20 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           if (other != null)
             PopupMenuButton<String>(
               onSelected: (value) {
-                if (value == 'block') {
-                  blockMember(context, ref, other.id, other.displayName);
-                } else {
-                  reportMember(context, ref, userId: other.id);
+                switch (value) {
+                  case 'profile':
+                    _openProfile();
+                  case 'delete_chat':
+                    _confirmDeleteChat();
+                  case 'block':
+                    blockMember(context, ref, other.id, other.displayName);
+                  case 'report':
+                    reportMember(context, ref, userId: other.id);
                 }
               },
               itemBuilder: (context) => const [
+                PopupMenuItem(value: 'profile', child: Text('View profile')),
+                PopupMenuItem(value: 'delete_chat', child: Text('Delete chat')),
                 PopupMenuItem(value: 'report', child: Text('Report')),
                 PopupMenuItem(value: 'block', child: Text('Block')),
               ],
@@ -129,7 +286,9 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
         ],
         title: other == null
             ? const Text('Chat')
-            : Column(
+            : GestureDetector(
+                onTap: _openProfile,
+                child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   ProfileAvatar(
@@ -144,7 +303,18 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                       fontWeight: FontWeight.w700,
                     ),
                   ),
+                  if (status != null)
+                    Text(
+                      status,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: typing || online == true
+                            ? AppColors.primary
+                            : theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                 ],
+                ),
               ),
       ),
       body: AsyncValueView(
@@ -160,10 +330,13 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            ProfileAvatar(
-                              name: state.conversation.otherUser.displayName,
-                              url: state.conversation.otherUser.primaryPhotoUrl,
-                              size: 96,
+                            GestureDetector(
+                              onTap: _openProfile,
+                              child: ProfileAvatar(
+                                name: state.conversation.otherUser.displayName,
+                                url: state.conversation.otherUser.primaryPhotoUrl,
+                                size: 96,
+                              ),
                             ),
                             const SizedBox(height: AppSpacing.md),
                             Text(
@@ -202,16 +375,11 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
                           message: message,
                           isMine: mine,
                           showRead: mine &&
+                              !message.isUnsent &&
                               message.id == lastOwn.id &&
                               message.status == MessageStatus.read,
-                          onReport: mine
-                              ? null
-                              : () => reportMember(
-                                  context,
-                                  ref,
-                                  userId: state.conversation.otherUser.id,
-                                  messageId: message.id,
-                                ),
+                          onLongPress: () =>
+                              _onMessageActions(message, isMine: mine),
                         );
                       },
                     ),
@@ -329,80 +497,97 @@ class _Bubble extends StatelessWidget {
     required this.message,
     required this.isMine,
     this.showRead = false,
-    this.onReport,
+    this.onLongPress,
   });
 
   final Message message;
   final bool isMine;
   final bool showRead;
-  final VoidCallback? onReport;
+  final VoidCallback? onLongPress;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     const big = Radius.circular(20);
     const small = Radius.circular(6);
+    final unsent = message.isUnsent;
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
       child: GestureDetector(
-        onLongPress: onReport,
+        onLongPress: onLongPress,
         child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.sizeOf(context).width * 0.75,
-        ),
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm + 3,
-        ),
-        decoration: BoxDecoration(
-          gradient: isMine ? AppColors.primaryGradient : null,
-          color: isMine ? null : scheme.surfaceContainerLowest,
-          borderRadius: BorderRadius.only(
-            topLeft: big,
-            topRight: big,
-            bottomLeft: isMine ? big : small,
-            bottomRight: isMine ? small : big,
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.75,
           ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (message.attachment != null &&
-                profileImageProvider(message.attachment!.url) != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: SizedBox(
-                  width: 180,
-                  height: 180,
-                  child: Image(
-                    image: profileImageProvider(message.attachment!.url)!,
-                    fit: BoxFit.cover,
-                  ),
-                ),
-              ),
-            if (message.text.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.only(top: message.attachment == null ? 0 : 6),
-                child: Text(
-                  message.text,
+          margin: const EdgeInsets.symmetric(vertical: 3),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm + 3,
+          ),
+          decoration: BoxDecoration(
+            gradient: isMine && !unsent ? AppColors.primaryGradient : null,
+            color: unsent
+                ? scheme.surfaceContainerHighest
+                : (isMine ? null : scheme.surfaceContainerLowest),
+            borderRadius: BorderRadius.only(
+              topLeft: big,
+              topRight: big,
+              bottomLeft: isMine ? big : small,
+              bottomRight: isMine ? small : big,
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (unsent)
+                Text(
+                  'This message was deleted',
                   style: TextStyle(
-                    color: isMine ? AppColors.white : scheme.onSurface,
-                    fontSize: 16,
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 15,
+                    fontStyle: FontStyle.italic,
                     height: 1.3,
                   ),
-                ),
-              ),
-            if (showRead)
-              const Padding(
-                padding: EdgeInsets.only(top: 2),
-                child: Text(
-                  'Read',
-                  style: TextStyle(color: AppColors.white, fontSize: 11),
-                ),
-              ),
-          ],
-        ),
+                )
+              else ...[
+                if (message.attachment != null &&
+                    profileImageProvider(message.attachment!.url) != null)
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 180,
+                      height: 180,
+                      child: Image(
+                        image: profileImageProvider(message.attachment!.url)!,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                if (message.text.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(
+                      top: message.attachment == null ? 0 : 6,
+                    ),
+                    child: Text(
+                      message.text,
+                      style: TextStyle(
+                        color: isMine ? AppColors.white : scheme.onSurface,
+                        fontSize: 16,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                if (showRead)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Text(
+                      'Read',
+                      style: TextStyle(color: AppColors.white, fontSize: 11),
+                    ),
+                  ),
+              ],
+            ],
+          ),
         ),
       ),
     );

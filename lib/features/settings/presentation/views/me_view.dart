@@ -17,6 +17,7 @@ import '../../../profile/presentation/widgets/profile_basics.dart';
 import '../../../subscriptions/presentation/viewmodels/subscription_view_model.dart';
 import '../../../subscriptions/presentation/widgets/premium_section.dart';
 import '../account_sheets.dart';
+import '../profile_detail_sheets.dart';
 
 String _showMeLabel(ShowMe showMe) => switch (showMe) {
   ShowMe.women => 'Women',
@@ -65,18 +66,44 @@ class _ProfileBody extends ConsumerWidget {
     final bio = profile.bio.trim();
     final basics = ProfileBasics.chipsFor(profile.basics);
 
-    Widget section(String title, Widget child) => Padding(
+    Widget section(
+      String title,
+      Widget child, {
+      String? action,
+      IconData? actionIcon,
+      VoidCallback? onAction,
+    }) => Padding(
       padding: const EdgeInsets.only(top: AppSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.only(
-              left: AppSpacing.xs,
-              bottom: AppSpacing.sm,
+            padding: const EdgeInsets.only(left: AppSpacing.xs),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                if (action != null && onAction != null)
+                  TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: AppColors.primary,
+                      visualDensity: VisualDensity.compact,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: onAction,
+                    icon: Icon(actionIcon, size: 18),
+                    label: Text(action),
+                  ),
+              ],
             ),
-            child: Text(title, style: theme.textTheme.titleLarge),
           ),
+          const SizedBox(height: AppSpacing.sm),
           Card(
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -87,20 +114,26 @@ class _ProfileBody extends ConsumerWidget {
       ),
     );
 
-    return ListView(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.md,
-        AppSpacing.md,
-        AppSpacing.md,
-        AppSpacing.xl,
-      ),
-      children: [
+    return RefreshIndicator(
+      onRefresh: () async {
+        await ref.refresh(myProfileViewModelProvider.future);
+        ref.invalidate(subscriptionViewModelProvider);
+      },
+      child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.fromLTRB(
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.md,
+          AppSpacing.xl,
+        ),
+        children: [
         Row(
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             SizedBox(
-              width: 72,
-              height: 94,
+              width: 84,
+              height: 108,
               child: ProfilePhoto(
                 name: profile.displayName,
                 url: profile.primaryPhotoUrl,
@@ -238,21 +271,17 @@ class _ProfileBody extends ConsumerWidget {
                       ),
                   ],
                 ),
-        ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: profile.photoUrls.length >= 6
-                ? null
-                : () => addProfilePhoto(context, ref),
-            icon: const Icon(Icons.add_a_photo_outlined),
-            label: const Text('Add photo'),
-          ),
+          action: profile.photoUrls.length >= 6 ? null : 'Add',
+          actionIcon: Icons.add_a_photo_outlined,
+          onAction: profile.photoUrls.length >= 6
+              ? null
+              : () => addProfilePhoto(context, ref),
         ),
         if (!profile.isVerified)
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
+              style: TextButton.styleFrom(foregroundColor: AppColors.primary),
               onPressed: () => submitSelfie(context, ref),
               icon: const Icon(Icons.verified_outlined),
               label: const Text('Verify with a selfie'),
@@ -266,38 +295,62 @@ class _ProfileBody extends ConsumerWidget {
               color: bio.isEmpty ? theme.colorScheme.onSurfaceVariant : null,
             ),
           ),
+          action: bio.isEmpty ? 'Add' : 'Edit',
+          actionIcon: bio.isEmpty ? Icons.add_rounded : Icons.edit_outlined,
+          onAction: () => EditProfileSheet.show(context, profile),
         ),
         if (profile.prompt case final prompt? when prompt.question != null)
           section(
             prompt.question!,
             Text(prompt.answer, style: theme.textTheme.titleMedium),
           ),
-        if (profile.relationshipGoal != null || basics.isNotEmpty)
-          section(
-            'Basics',
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: [
-                if (profile.relationshipGoal case final goal?)
-                  InfoChip(icon: Icons.search_rounded, label: goal.label),
-                ...basics,
-              ],
-            ),
-          ),
-        if (profile.interests.isNotEmpty)
-          section(
-            'Interests',
-            Wrap(
-              spacing: AppSpacing.sm,
-              runSpacing: AppSpacing.sm,
-              children: [
-                for (final interest in profile.interests)
-                  InfoChip(label: interest),
-              ],
-            ),
-          ),
-      ],
+        section(
+          'Basics',
+          profile.relationshipGoal == null && basics.isEmpty
+              ? Text(
+                  'No basics yet.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                )
+              : Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    if (profile.relationshipGoal case final goal?)
+                      InfoChip(icon: Icons.search_rounded, label: goal.label),
+                    ...basics,
+                  ],
+                ),
+          action: basics.isEmpty ? 'Add' : 'Edit',
+          actionIcon: basics.isEmpty ? Icons.add_rounded : Icons.edit_outlined,
+          onAction: () => EditBasicsSheet.show(context, profile.basics),
+        ),
+        section(
+          'Interests',
+          profile.interests.isEmpty
+              ? Text(
+                  'No interests yet.',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                )
+              : Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    for (final interest in profile.interests)
+                      InfoChip(label: interest),
+                  ],
+                ),
+          action: profile.interests.isEmpty ? 'Add' : 'Edit',
+          actionIcon: profile.interests.isEmpty
+              ? Icons.add_rounded
+              : Icons.edit_outlined,
+          onAction: () => EditInterestsSheet.show(context, profile.interests),
+        ),
+        ],
+      ),
     );
   }
 }
@@ -494,7 +547,11 @@ class _SettingsSheet extends ConsumerWidget {
             ),
             child: Row(
               children: [
-                const SizedBox(width: 40),
+                IconButton(
+                  tooltip: 'Back',
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.arrow_back_rounded),
+                ),
                 Expanded(
                   child: Text(
                     'Settings',

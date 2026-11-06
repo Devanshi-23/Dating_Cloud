@@ -17,10 +17,11 @@ flutter test
 | [docs/architecture.md](docs/architecture.md) | Layers, dependency rules, folder layout |
 | [docs/feature_matrix.md](docs/feature_matrix.md) | What's mock-ready, API-ready or waiting on the backend |
 | [docs/implementation_plan.md](docs/implementation_plan.md) | Phases 0–9 |
-| [docs/api/openapi.yaml](docs/api/openapi.yaml) | Proposed REST contract (OpenAPI 3.0) |
+| [docs/api/backend_api.md](docs/api/backend_api.md) | **Local backend API** — run, Postman flow, all routes |
+| [docs/api/openapi.yaml](docs/api/openapi.yaml) | REST contract (OpenAPI 3.0) |
 | [docs/api/api_reference.md](docs/api/api_reference.md) | Endpoint guide with examples |
 | [docs/api/error_codes.md](docs/api/error_codes.md) | Error envelope and codes |
-| [docs/api/socket_events.md](docs/api/socket_events.md) | Proposed realtime events |
+| [docs/api/socket_events.md](docs/api/socket_events.md) | Realtime Socket.IO events |
 
 The original brief is in
 [`dating_app_cursor_mock_api_master_prompt.md`](dating_app_cursor_mock_api_master_prompt.md).

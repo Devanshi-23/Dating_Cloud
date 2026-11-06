@@ -23,8 +23,7 @@ abstract final class ApiEndpoints {
   static const profileVerification = '/profile/verification';
   static String profile(String userId) => '/profiles/$userId';
 
-  static const mediaUploadUrl = '/media/upload-url';
-  static const mediaComplete = '/media/complete';
+  static const mediaUpload = '/media/upload';
   static String media(String mediaId) => '/media/$mediaId';
 
   static const discovery = '/discovery';
@@ -42,7 +41,10 @@ abstract final class ApiEndpoints {
       '/conversations/$conversationId';
   static String messages(String conversationId) =>
       '/conversations/$conversationId/messages';
+  static String message(String messageId) => '/messages/$messageId';
   static String messageRead(String messageId) => '/messages/$messageId/read';
+  static String messageUnsend(String messageId) =>
+      '/messages/$messageId/unsend';
   static String messageReport(String messageId) =>
       '/messages/$messageId/report';
 

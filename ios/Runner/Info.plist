@@ -49,6 +49,8 @@
 	</dict>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Choose photos to show on your Dating Cloud profile.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save photos from your chats to your photo library.</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Take a photo for your Dating Cloud profile.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>

@@ -1,10 +1,25 @@
 import jwt from 'jsonwebtoken';
 import { Server } from 'socket.io';
 import { config } from './config.js';
-import { emitToUsers, setRealtimeSink } from './realtime-hub.js';
+import { emitToUsers, setRealtimeSink, setUserOnline } from './realtime-hub.js';
 import { markMessagesRead, participantConversation, store } from './routes.js';
 
 const typingAt = new Map();
+const socketsByUser = new Map();
+
+function publishPresence(userId, isOnline) {
+  setUserOnline(userId, isOnline);
+  for (const conversation of store.conversations.values()) {
+    if (!conversation.userIds.includes(userId)) continue;
+    const otherId = conversation.userIds.find((id) => id !== userId);
+    if (!otherId) continue;
+    emitToUsers([otherId], 'presence', {
+      userId,
+      isOnline,
+      status: isOnline ? 'online' : 'offline',
+    });
+  }
+}
 
 function ack(callback, body) {
   if (typeof callback === 'function') callback(body);
@@ -41,12 +56,24 @@ export function attachRealtime(httpServer) {
   nsp.on('connection', (socket) => {
     const userId = socket.data.userId;
     socket.join(`user:${userId}`);
+    const openSockets = (socketsByUser.get(userId) ?? 0) + 1;
+    socketsByUser.set(userId, openSockets);
+    if (openSockets === 1) publishPresence(userId, true);
     const delay = Math.max(0, socket.data.exp * 1000 - Date.now());
     const timer = setTimeout(() => {
       socket.emit('session:expired', { code: 'UNAUTHENTICATED' });
       socket.disconnect(true);
     }, delay);
-    socket.on('disconnect', () => clearTimeout(timer));
+    socket.on('disconnect', () => {
+      clearTimeout(timer);
+      const remaining = (socketsByUser.get(userId) ?? 1) - 1;
+      if (remaining <= 0) {
+        socketsByUser.delete(userId);
+        publishPresence(userId, false);
+      } else {
+        socketsByUser.set(userId, remaining);
+      }
+    });
 
     socket.on('typing', (payload, callback) => {
       const conversation = participantConversation(userId, payload?.conversationId);

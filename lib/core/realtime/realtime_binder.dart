@@ -1,6 +1,6 @@
 import 'dart:async';
 
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -149,13 +149,17 @@ class _RealtimeBinderState extends ConsumerState<RealtimeBinder>
         ref.invalidate(conversationsViewModelProvider);
         final me = ref.read(sessionViewModelProvider).value?.userId;
         final open = ref.read(openConversationProvider);
-        if (!_messagesEnabled || message.senderId == me || open == message.conversationId) {
-          return;
-        }
+        if (message.senderId == me || open == message.conversationId) return;
+        final preview = message.preview.trim();
+        final body = preview.isEmpty ? 'You have a new message' : preview;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(body)));
+        if (!_messagesEnabled) return;
         _notify(
           id: message.conversationId.hashCode & 0x7fffffff,
           title: 'New message',
-          body: 'You have a new message',
+          body: body,
           payload: message.conversationId,
         );
       case MatchArrived():
@@ -170,10 +174,19 @@ class _RealtimeBinderState extends ConsumerState<RealtimeBinder>
         if (ref.read(openConversationProvider) == conversationId) {
           ref.read(routerProvider).go(RoutePaths.chats);
         }
+      case ConversationDeleted(:final conversationId):
+        ref.invalidate(conversationsViewModelProvider);
+        if (ref.read(openConversationProvider) == conversationId) {
+          ref.read(routerProvider).go(RoutePaths.chats);
+        }
+      case MessageDeleted():
+      case MessageUnsent():
+        ref.invalidate(conversationsViewModelProvider);
       case EntitlementChanged():
         ref.invalidate(subscriptionViewModelProvider);
       case MessagesRead():
       case TypingChanged():
+      case PresenceChanged():
         break;
     }
   }

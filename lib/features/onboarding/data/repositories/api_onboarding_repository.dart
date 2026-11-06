@@ -24,7 +24,7 @@ class ApiOnboardingRepository implements OnboardingRepository {
     asJson(await _client.get(ApiEndpoints.interests)),
   );
 
-  /// `POST /media/upload-url`, then `PUT` the bytes, then `POST /media/complete`.
+  /// `POST /media/upload` as multipart: `file` plus `purpose`.
   @override
   Future<UploadedPhoto> uploadPhoto(
     LocalImage image, {
@@ -39,24 +39,19 @@ class ApiOnboardingRepository implements OnboardingRepository {
         message: 'That photo could not be read. Choose another one.',
       );
     }
-    final ticket = asJson(
-      await _client.post(
-        ApiEndpoints.mediaUploadUrl,
-        body: {
-          'purpose': purpose,
-          'contentType': image.contentType,
-          'sizeBytes': bytes.length,
-        },
+    final media = asJson(
+      await _client.upload(
+        ApiEndpoints.mediaUpload,
+        bytes: bytes,
+        filename: _fileName(image.path),
+        contentType: image.contentType,
+        fields: {'purpose': purpose},
       ),
     );
-    final mediaId = ticket.req<String>('mediaId');
-    await _client.putBytes(
-      ticket.req<String>('uploadUrl'),
-      bytes: bytes,
-      contentType: image.contentType,
+    return UploadedPhoto(
+      mediaId: media.req<String>('mediaId'),
+      previewPath: image.path,
     );
-    await _client.post(ApiEndpoints.mediaComplete, body: {'mediaId': mediaId});
-    return UploadedPhoto(mediaId: mediaId, previewPath: image.path);
   }
 
   @override
@@ -69,4 +64,9 @@ class ApiOnboardingRepository implements OnboardingRepository {
           ),
         ),
       );
+
+  static String _fileName(String path) {
+    final name = path.replaceAll('\\', '/').split('/').last.trim();
+    return name.isEmpty ? 'photo.jpg' : name;
+  }
 }

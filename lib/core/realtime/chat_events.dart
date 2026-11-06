@@ -56,3 +56,38 @@ class MatchRemoved extends ChatEvent {
 class EntitlementChanged extends ChatEvent {
   const EntitlementChanged();
 }
+
+class PresenceChanged extends ChatEvent {
+  const PresenceChanged({required this.userId, required this.isOnline});
+
+  final String userId;
+  final bool isOnline;
+}
+
+class ConversationDeleted extends ChatEvent {
+  const ConversationDeleted({required this.conversationId});
+
+  final String conversationId;
+}
+
+class MessageDeleted extends ChatEvent {
+  const MessageDeleted({
+    required this.conversationId,
+    required this.messageId,
+  });
+
+  final String conversationId;
+  final String messageId;
+}
+
+class MessageUnsent extends ChatEvent {
+  const MessageUnsent({
+    required this.conversationId,
+    required this.messageId,
+    required this.message,
+  });
+
+  final String conversationId;
+  final String messageId;
+  final Message message;
+}

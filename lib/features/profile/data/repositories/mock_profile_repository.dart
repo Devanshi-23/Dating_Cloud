@@ -42,10 +42,18 @@ class MockProfileRepository implements ProfileRepository {
             details: [FieldError(field: 'displayName', reason: 'LENGTH_1_40')],
           );
         }
+        if (update.interests != null &&
+            (update.interests!.isEmpty || update.interests!.length > 10)) {
+          throw const Failure(
+            ErrorCode.validationError,
+            details: [FieldError(field: 'interests', reason: 'COUNT_1_10')],
+          );
+        }
         _backend.me = _backend.me.copyWith(
           displayName: name,
           bio: update.bio,
           interests: update.interests,
+          basics: update.basics,
         );
         return _myProfile();
       });

@@ -84,7 +84,13 @@ class ApiChatSocket implements ChatSocket {
       ..onConnect((_) => _add(const SocketConnected()))
       ..on('message:new', _onMessage)
       ..on('message:read', _onRead)
+      ..on('message:deleted', _onMessageDeleted)
+      ..on('message:unsent', _onMessageUnsent)
+      ..on('conversation:deleted', _onConversationDeleted)
       ..on('typing', _onTyping)
+      ..on('presence', _onPresence)
+      ..on('user:online', (data) => _onPresence(data, forced: true))
+      ..on('user:offline', (data) => _onPresence(data, forced: false))
       ..on('match:new', (_) => _add(const MatchArrived()))
       ..on('match:removed', _onMatchRemoved)
       ..on('entitlement:updated', (_) => _add(const EntitlementChanged()))
@@ -136,6 +142,30 @@ class ApiChatSocket implements ChatSocket {
     );
   }
 
+  void _onPresence(dynamic data, {bool? forced}) {
+    final json = _map(data);
+    final userId = json['userId'] ?? json['id'];
+    if (userId is! String || userId.isEmpty) return;
+    final isOnline = forced ?? _isOnline(json);
+    if (isOnline == null) return;
+    _add(PresenceChanged(userId: userId, isOnline: isOnline));
+  }
+
+  bool? _isOnline(Map<String, dynamic> json) {
+    final value = json['isOnline'] ?? json['online'];
+    if (value is bool) return value;
+    final status = json['status'] ?? json['presence'];
+    if (status is String) {
+      switch (status.toLowerCase()) {
+        case 'online':
+          return true;
+        case 'offline':
+          return false;
+      }
+    }
+    return null;
+  }
+
   void _onTyping(dynamic data) {
     final json = _map(data);
     final conversationId = json['conversationId'];
@@ -156,6 +186,41 @@ class ApiChatSocket implements ChatSocket {
     final conversationId = json['conversationId'];
     if (matchId is! String || conversationId is! String) return;
     _add(MatchRemoved(matchId: matchId, conversationId: conversationId));
+  }
+
+  void _onConversationDeleted(dynamic data) {
+    final conversationId = _map(data)['conversationId'];
+    if (conversationId is! String) return;
+    _add(ConversationDeleted(conversationId: conversationId));
+  }
+
+  void _onMessageDeleted(dynamic data) {
+    final json = _map(data);
+    final conversationId = json['conversationId'];
+    final messageId = json['messageId'];
+    if (conversationId is! String || messageId is! String) return;
+    _add(
+      MessageDeleted(conversationId: conversationId, messageId: messageId),
+    );
+  }
+
+  void _onMessageUnsent(dynamic data) {
+    final json = _map(data);
+    final conversationId = json['conversationId'];
+    final messageId = json['messageId'];
+    final raw = json['message'];
+    if (conversationId is! String || messageId is! String) return;
+    final message = raw is Map
+        ? MessageDto.fromJson(_map(raw))
+        : null;
+    if (message == null) return;
+    _add(
+      MessageUnsent(
+        conversationId: conversationId,
+        messageId: messageId,
+        message: message,
+      ),
+    );
   }
 
   Future<void> _refresh() async {

@@ -52,6 +52,7 @@ class UserProfile {
     List<String>? photoUrls,
     List<String>? photoIds,
     bool? isVerified,
+    Map<String, String>? basics,
   }) => UserProfile(
     id: id,
     displayName: displayName ?? this.displayName,
@@ -65,7 +66,7 @@ class UserProfile {
     distanceKm: distanceKm,
     isVerified: isVerified ?? this.isVerified,
     relationshipGoal: relationshipGoal,
-    basics: basics,
+    basics: basics ?? this.basics,
     prompt: prompt,
   );
 }
@@ -100,15 +101,22 @@ class MyProfile {
 }
 
 class ProfileUpdate {
-  const ProfileUpdate({this.displayName, this.bio, this.interests});
+  const ProfileUpdate({
+    this.displayName,
+    this.bio,
+    this.interests,
+    this.basics,
+  });
 
   final String? displayName;
   final String? bio;
   final List<String>? interests;
+  final Map<String, String>? basics;
 
   Map<String, dynamic> toJson() => {
     if (displayName != null) 'displayName': displayName,
     if (bio != null) 'bio': bio,
     if (interests != null) 'interests': interests,
+    if (basics != null) 'basics': basics,
   };
 }

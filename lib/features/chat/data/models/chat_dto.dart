@@ -12,10 +12,12 @@ class MessageDto {
     status: switch (json.opt<String>('status')) {
       'READ' => MessageStatus.read,
       'DELIVERED' => MessageStatus.delivered,
+      'UNSENT' => MessageStatus.unsent,
       _ => MessageStatus.sent,
     },
     clientMessageId: json.opt<String>('clientMessageId'),
     attachment: _attachment(json['attachment']),
+    unsentAt: json.optDate('unsentAt'),
   );
 
   static MessageAttachment? _attachment(Object? value) {
@@ -40,6 +42,7 @@ class MessageDto {
         'mediaId': m.attachment!.mediaId,
         'url': m.attachment!.url,
       },
+    if (m.unsentAt != null) 'unsentAt': m.unsentAt!.toUtc().toIso8601String(),
   };
 }
 
@@ -55,6 +58,23 @@ class ConversationDto {
           ? null
           : MessageDto.fromJson(asJson(last, 'lastMessage')),
       unreadCount: json.opt<num>('unreadCount')?.toInt() ?? 0,
+      otherIsOnline: _online(json['otherUser']),
     );
+  }
+
+  static bool? _online(Object? user) {
+    if (user is! Map) return null;
+    final value = user['isOnline'] ?? user['online'];
+    if (value is bool) return value;
+    final status = user['status'] ?? user['presence'];
+    if (status is String) {
+      switch (status.toLowerCase()) {
+        case 'online':
+          return true;
+        case 'offline':
+          return false;
+      }
+    }
+    return null;
   }
 }

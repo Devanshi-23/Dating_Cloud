@@ -104,30 +104,12 @@ class MockChatRepository implements ChatRepository {
       final index = entry.value.indexWhere((message) => message.id == messageId);
       if (index < 0) continue;
       final target = entry.value[index];
-      entry.value[index] = Message(
-        id: target.id,
-        conversationId: target.conversationId,
-        senderId: target.senderId,
-        text: target.text,
-        sentAt: target.sentAt,
-        status: MessageStatus.read,
-        clientMessageId: target.clientMessageId,
-        attachment: target.attachment,
-      );
+      entry.value[index] = target.copyWith(status: MessageStatus.read);
       for (var i = 0; i < index; i++) {
         final message = entry.value[i];
         if (message.senderId == MockFixtures.currentUserId) continue;
         if (!message.sentAt.isAfter(target.sentAt)) {
-          entry.value[i] = Message(
-            id: message.id,
-            conversationId: message.conversationId,
-            senderId: message.senderId,
-            text: message.text,
-            sentAt: message.sentAt,
-            status: MessageStatus.read,
-            clientMessageId: message.clientMessageId,
-            attachment: message.attachment,
-          );
+          entry.value[i] = message.copyWith(status: MessageStatus.read);
         }
       }
       final conversation = _backend.conversations[entry.key];
@@ -136,7 +118,7 @@ class MockChatRepository implements ChatRepository {
           id: conversation.id,
           matchId: conversation.matchId,
           otherUser: conversation.otherUser,
-          lastMessage: entry.value.last,
+          lastMessage: entry.value.isEmpty ? null : entry.value.last,
           unreadCount: 0,
         );
       }
@@ -144,6 +126,72 @@ class MockChatRepository implements ChatRepository {
     }
     throw const Failure(ErrorCode.notFound);
   });
+
+  @override
+  Future<void> deleteConversation(String conversationId) =>
+      _backend.run('deleteConversation', () {
+        _conversation(conversationId);
+        _backend.conversations.remove(conversationId);
+        _backend.messages.remove(conversationId);
+      });
+
+  @override
+  Future<void> deleteMessageForMe(String messageId) =>
+      _backend.run('deleteMessageForMe', () {
+        for (final entry in _backend.messages.entries) {
+          final index =
+              entry.value.indexWhere((message) => message.id == messageId);
+          if (index < 0) continue;
+          entry.value.removeAt(index);
+          final conversation = _backend.conversations[entry.key];
+          if (conversation != null) {
+            _backend.conversations[entry.key] = Conversation(
+              id: conversation.id,
+              matchId: conversation.matchId,
+              otherUser: conversation.otherUser,
+              lastMessage: entry.value.isEmpty ? null : entry.value.last,
+              unreadCount: conversation.unreadCount,
+            );
+          }
+          return;
+        }
+        throw const Failure(ErrorCode.notFound);
+      });
+
+  @override
+  Future<Message> unsendMessage(String messageId) =>
+      _backend.run('unsendMessage', () {
+        for (final entry in _backend.messages.entries) {
+          final index =
+              entry.value.indexWhere((message) => message.id == messageId);
+          if (index < 0) continue;
+          final target = entry.value[index];
+          if (target.senderId != MockFixtures.currentUserId) {
+            throw const Failure(ErrorCode.forbidden);
+          }
+          if (target.isUnsent) return target;
+          final updated = target.copyWith(
+            text: '',
+            status: MessageStatus.unsent,
+            clearAttachment: true,
+            unsentAt: _backend.now(),
+          );
+          entry.value[index] = updated;
+          final conversation = _backend.conversations[entry.key];
+          if (conversation != null &&
+              conversation.lastMessage?.id == messageId) {
+            _backend.conversations[entry.key] = Conversation(
+              id: conversation.id,
+              matchId: conversation.matchId,
+              otherUser: conversation.otherUser,
+              lastMessage: updated,
+              unreadCount: conversation.unreadCount,
+            );
+          }
+          return updated;
+        }
+        throw const Failure(ErrorCode.notFound);
+      });
 
   Conversation _conversation(String id) =>
       _backend.conversations[id] ?? (throw const Failure(ErrorCode.notFound));

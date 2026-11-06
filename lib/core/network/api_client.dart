@@ -79,24 +79,7 @@ class ApiClient {
   Future<Object?> delete(String path) =>
       _send(() => _dio.delete<dynamic>(path));
 
-  /// Storage `PUT` from `POST /media/upload-url`. No API auth header.
-  Future<void> putBytes(
-    String url, {
-    required List<int> bytes,
-    required String contentType,
-  }) => _send(
-    () => _dio.put<dynamic>(
-      url,
-      data: bytes,
-      options: Options(
-        contentType: contentType,
-        responseType: ResponseType.plain,
-        extra: {AuthInterceptor.skipAuthKey: true},
-      ),
-    ),
-  );
-
-  /// Multipart upload kept for tests that still build a form body.
+  /// Multipart `POST /media/upload`. Auth header is attached by the interceptor.
   Future<Object?> upload(
     String path, {
     required List<int> bytes,

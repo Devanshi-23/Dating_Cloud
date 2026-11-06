@@ -24,6 +24,28 @@ const reportReasons = <String, String>{
   'OTHER': 'Something else',
 };
 
+class _SheetHeader extends StatelessWidget {
+  const _SheetHeader(this.title);
+
+  final String title;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        IconButton(
+          tooltip: 'Back',
+          onPressed: () => Navigator.pop(context),
+          icon: const Icon(Icons.arrow_back_rounded),
+        ),
+        Expanded(
+          child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+        ),
+      ],
+    );
+  }
+}
+
 void showFailure(BuildContext context, Object error) {
   final message = error is Failure ? error.message : 'Something went wrong.';
   ScaffoldMessenger.of(context)
@@ -196,7 +218,7 @@ class _DiscoverySettingsSheetState extends ConsumerState<DiscoverySettingsSheet>
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Discovery', style: theme.textTheme.titleLarge),
+          const _SheetHeader('Discovery'),
           const SizedBox(height: AppSpacing.md),
           Text('Age ${_age.start.round()}–${_age.end.round()}'),
           RangeSlider(
@@ -301,7 +323,7 @@ class _EditProfileSheetState extends ConsumerState<EditProfileSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Edit profile', style: Theme.of(context).textTheme.titleLarge),
+          const _SheetHeader('Edit profile'),
           const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _name,
@@ -478,7 +500,7 @@ class _HelpSheetState extends ConsumerState<HelpSheet> {
         controller: controller,
         padding: const EdgeInsets.all(AppSpacing.md),
         children: [
-          Text('Help', style: Theme.of(context).textTheme.titleLarge),
+          const _SheetHeader('Help'),
           FutureBuilder(
             future: _faqs,
             builder: (context, snapshot) {
@@ -586,17 +608,27 @@ class _NotificationSettingsSheetState
   @override
   Widget build(BuildContext context) {
     final prefs = _prefs;
-    if (_error != null) {
-      return Padding(
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Text(_error is Failure ? (_error! as Failure).message : 'Could not load'),
+    if (_error != null || prefs == null) {
+      return ListView(
+        padding: const EdgeInsets.all(AppSpacing.md),
+        children: [
+          const _SheetHeader('Notifications'),
+          const SizedBox(height: AppSpacing.lg),
+          if (_error != null)
+            Text(
+              _error is Failure
+                  ? (_error! as Failure).message
+                  : 'Could not load',
+            )
+          else
+            const Center(child: CircularProgressIndicator()),
+        ],
       );
     }
-    if (prefs == null) return const Center(child: CircularProgressIndicator());
     return ListView(
       padding: const EdgeInsets.all(AppSpacing.md),
       children: [
-        Text('Notifications', style: Theme.of(context).textTheme.titleLarge),
+        const _SheetHeader('Notifications'),
         SwitchListTile(
           title: const Text('New matches'),
           value: prefs.newMatches,
@@ -667,13 +699,33 @@ class _BlockedSheetState extends ConsumerState<BlockedSheet> {
       builder: (context, snapshot) {
         final people = snapshot.data ?? const <BlockedMember>[];
         if (snapshot.connectionState != ConnectionState.done) {
-          return const Center(child: CircularProgressIndicator());
+          return const Padding(
+            padding: EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              children: [
+                _SheetHeader('Blocked people'),
+                SizedBox(height: AppSpacing.lg),
+                Center(child: CircularProgressIndicator()),
+              ],
+            ),
+          );
         }
         if (people.isEmpty) {
-          return const Center(child: Text('You have not blocked anyone.'));
+          return const Padding(
+            padding: EdgeInsets.all(AppSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SheetHeader('Blocked people'),
+                SizedBox(height: AppSpacing.lg),
+                Center(child: Text('You have not blocked anyone.')),
+              ],
+            ),
+          );
         }
         return ListView(
           children: [
+            const _SheetHeader('Blocked people'),
             for (final person in people)
               ListTile(
                 title: Text(person.displayName),

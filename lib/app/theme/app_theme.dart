@@ -159,6 +159,7 @@ abstract final class AppTheme {
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+          side: BorderSide(color: scheme.outline.withValues(alpha: 0.9)),
         ),
       ),
       dividerTheme: DividerThemeData(

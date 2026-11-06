@@ -1,6 +1,6 @@
 import '../../../profile/domain/entities/user_profile.dart';
 
-enum MessageStatus { sent, delivered, read }
+enum MessageStatus { sent, delivered, read, unsent }
 
 class MessageAttachment {
   const MessageAttachment({required this.mediaId, required this.url});
@@ -19,6 +19,7 @@ class Message {
     this.status = MessageStatus.sent,
     this.clientMessageId,
     this.attachment,
+    this.unsentAt,
   });
 
   final String id;
@@ -29,18 +30,32 @@ class Message {
   final MessageStatus status;
   final String? clientMessageId;
   final MessageAttachment? attachment;
+  final DateTime? unsentAt;
 
-  String get preview => text.isNotEmpty ? text : (attachment == null ? '' : 'Photo');
+  bool get isUnsent => status == MessageStatus.unsent;
 
-  Message copyWith({MessageStatus? status}) => Message(
+  String get preview {
+    if (isUnsent) return 'This message was deleted';
+    if (text.isNotEmpty) return text;
+    return attachment == null ? '' : 'Photo';
+  }
+
+  Message copyWith({
+    String? text,
+    MessageStatus? status,
+    MessageAttachment? attachment,
+    bool clearAttachment = false,
+    DateTime? unsentAt,
+  }) => Message(
     id: id,
     conversationId: conversationId,
     senderId: senderId,
-    text: text,
+    text: text ?? this.text,
     sentAt: sentAt,
     status: status ?? this.status,
     clientMessageId: clientMessageId,
-    attachment: attachment,
+    attachment: clearAttachment ? null : (attachment ?? this.attachment),
+    unsentAt: unsentAt ?? this.unsentAt,
   );
 }
 
@@ -51,6 +66,7 @@ class Conversation {
     required this.otherUser,
     this.lastMessage,
     this.unreadCount = 0,
+    this.otherIsOnline,
   });
 
   final String id;
@@ -58,4 +74,7 @@ class Conversation {
   final UserProfile otherUser;
   final Message? lastMessage;
   final int unreadCount;
+
+  /// `null` until the API or a presence event says online or offline.
+  final bool? otherIsOnline;
 }

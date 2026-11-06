@@ -82,12 +82,19 @@ class ProfileCard extends StatelessWidget {
             Positioned(
               left: AppSpacing.md + 2,
               right: AppSpacing.md,
+              top: AppSpacing.sm,
               bottom: AppSpacing.md + bottomInset,
               child: DefaultTextStyle.merge(
                 style: const TextStyle(color: AppColors.white),
-                child: Column(
+                child: LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    reverse: true,
+                    physics: const ClampingScrollPhysics(),
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                      child: Column(
+                  mainAxisAlignment: MainAxisAlignment.end,
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -173,6 +180,9 @@ class ProfileCard extends StatelessWidget {
                       ),
                     ],
                   ],
+                ),
+                    ),
+                  ),
                 ),
               ),
             ),

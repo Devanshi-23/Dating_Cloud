@@ -7,6 +7,7 @@ import '../../../../core/di/repository_providers.dart';
 import '../../../../core/errors/failure.dart';
 import '../../../../core/realtime/chat_events.dart';
 import '../../../../core/realtime/chat_socket.dart';
+import '../../../../core/realtime/presence.dart';
 import '../../../onboarding/domain/entities/onboarding.dart';
 import '../../domain/entities/chat.dart';
 import 'conversations_view_model.dart';
@@ -64,9 +65,13 @@ class ConversationViewModel extends AsyncNotifier<ConversationState> {
     ref.onDispose(sub.cancel);
 
     final conversation = await repository.getConversation(conversationId);
+    ref
+        .read(presenceProvider.notifier)
+        .seed(conversation.otherUser.id, conversation.otherIsOnline);
     final page = await repository.getMessages(conversationId);
     final incoming = page.items.where(
-      (message) => message.senderId == conversation.otherUser.id,
+      (message) =>
+          message.senderId == conversation.otherUser.id && !message.isUnsent,
     );
     if (incoming.isNotEmpty) {
       unawaited(
@@ -91,7 +96,8 @@ class ConversationViewModel extends AsyncNotifier<ConversationState> {
     if (!identical(next, current)) state = AsyncData(next);
     if (event is MessageArrived &&
         event.message.conversationId == conversationId &&
-        event.message.senderId == current.conversation.otherUser.id) {
+        event.message.senderId == current.conversation.otherUser.id &&
+        !event.message.isUnsent) {
       unawaited(
         ref
             .read(chatRepositoryProvider)
@@ -138,12 +144,88 @@ class ConversationViewModel extends AsyncNotifier<ConversationState> {
                 message,
           ],
         );
+      case MessageDeleted(:final conversationId, :final messageId):
+        if (conversationId != this.conversationId) return current;
+        return current.copyWith(
+          messages: [
+            for (final message in current.messages)
+              if (message.id != messageId) message,
+          ],
+        );
+      case MessageUnsent(:final conversationId, :final messageId, :final message):
+        if (conversationId != this.conversationId) return current;
+        return current.copyWith(
+          messages: [
+            for (final item in current.messages)
+              if (item.id == messageId) message else item,
+          ],
+        );
+      case ConversationDeleted(:final conversationId):
+        if (conversationId != this.conversationId) return current;
+        return current;
+      case PresenceChanged():
       case SocketConnected():
       case SessionLost():
       case MatchArrived():
       case MatchRemoved():
       case EntitlementChanged():
         return current;
+    }
+  }
+
+  Future<Failure?> deleteConversation() async {
+    try {
+      await ref.read(chatRepositoryProvider).deleteConversation(conversationId);
+      if (!ref.mounted) return null;
+      ref.invalidate(conversationsViewModelProvider);
+      return null;
+    } on Failure catch (failure) {
+      return failure;
+    }
+  }
+
+  Future<Failure?> deleteMessageForMe(String messageId) async {
+    final current = state.value;
+    if (current == null) return null;
+    try {
+      await ref.read(chatRepositoryProvider).deleteMessageForMe(messageId);
+      if (!ref.mounted) return null;
+      final latest = state.value ?? current;
+      state = AsyncData(
+        latest.copyWith(
+          messages: [
+            for (final message in latest.messages)
+              if (message.id != messageId) message,
+          ],
+        ),
+      );
+      ref.invalidate(conversationsViewModelProvider);
+      return null;
+    } on Failure catch (failure) {
+      return failure;
+    }
+  }
+
+  Future<Failure?> unsendMessage(String messageId) async {
+    final current = state.value;
+    if (current == null) return null;
+    try {
+      final updated =
+          await ref.read(chatRepositoryProvider).unsendMessage(messageId);
+      if (!ref.mounted) return null;
+      final latest = state.value ?? current;
+      state = AsyncData(
+        latest.copyWith(
+          messages: [
+            for (final message in latest.messages)
+              if (message.id == messageId) updated else message,
+          ],
+        ),
+      );
+      ref.invalidate(conversationsViewModelProvider);
+      return null;
+    } on Failure catch (failure) {
+      return failure;
     }
   }
 

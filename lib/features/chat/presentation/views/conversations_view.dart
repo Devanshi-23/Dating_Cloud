@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/router/route_names.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
+import '../../../../core/realtime/presence.dart';
 import '../../../../core/widgets/app_controls.dart';
 import '../../../../core/widgets/async_value_view.dart';
 import '../../../../core/widgets/profile_avatar.dart';
@@ -46,6 +47,7 @@ class ConversationsView extends ConsumerWidget {
                   ];
                   void open(Conversation c) =>
                       context.go(RoutePaths.conversation(c.id));
+                  final online = ref.watch(presenceProvider);
                   return RefreshIndicator(
                     onRefresh: () =>
                         ref.refresh(conversationsViewModelProvider.future),
@@ -67,6 +69,7 @@ class ConversationsView extends ConsumerWidget {
                                     const SizedBox(width: AppSpacing.md - 4),
                                 itemBuilder: (_, i) => _NewMatchTile(
                                   conversation: fresh[i],
+                                  online: online[fresh[i].otherUser.id] == true,
                                   onTap: () => open(fresh[i]),
                                 ),
                               ),
@@ -79,6 +82,7 @@ class ConversationsView extends ConsumerWidget {
                             itemCount: active.length,
                             itemBuilder: (_, i) => _MessageRow(
                               conversation: active[i],
+                              online: online[active[i].otherUser.id] == true,
                               onTap: () => open(active[i]),
                             ),
                           ),
@@ -123,9 +127,14 @@ class _SectionLabel extends StatelessWidget {
 }
 
 class _NewMatchTile extends StatelessWidget {
-  const _NewMatchTile({required this.conversation, required this.onTap});
+  const _NewMatchTile({
+    required this.conversation,
+    required this.online,
+    required this.onTap,
+  });
 
   final Conversation conversation;
+  final bool online;
   final VoidCallback onTap;
 
   @override
@@ -145,11 +154,23 @@ class _NewMatchTile extends StatelessWidget {
               SizedBox(
                 width: 88,
                 height: 116,
-                child: ProfilePhoto(
-                  name: user.displayName,
-                  url: user.primaryPhotoUrl,
-                  initialsSize: 32,
-                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd - 4),
+                child: Stack(
+                  children: [
+                    ProfilePhoto(
+                      name: user.displayName,
+                      url: user.primaryPhotoUrl,
+                      initialsSize: 32,
+                      borderRadius: BorderRadius.circular(
+                        AppSpacing.radiusMd - 4,
+                      ),
+                    ),
+                    if (online)
+                      const Positioned(
+                        right: 6,
+                        bottom: 6,
+                        child: _OnlineDot(),
+                      ),
+                  ],
                 ),
               ),
               const SizedBox(height: AppSpacing.xs + 2),
@@ -168,9 +189,14 @@ class _NewMatchTile extends StatelessWidget {
 }
 
 class _MessageRow extends StatelessWidget {
-  const _MessageRow({required this.conversation, required this.onTap});
+  const _MessageRow({
+    required this.conversation,
+    required this.online,
+    required this.onTap,
+  });
 
   final Conversation conversation;
+  final bool online;
   final VoidCallback onTap;
 
   @override
@@ -187,10 +213,10 @@ class _MessageRow extends StatelessWidget {
         ),
         child: Row(
           children: [
-            ProfileAvatar(
+            _OnlineAvatar(
               name: user.displayName,
               url: user.primaryPhotoUrl,
-              size: 64,
+              online: online,
             ),
             const SizedBox(width: AppSpacing.md - 2),
             Expanded(
@@ -226,6 +252,50 @@ class _MessageRow extends StatelessWidget {
                 label: Text('${conversation.unreadCount}'),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OnlineAvatar extends StatelessWidget {
+  const _OnlineAvatar({
+    required this.name,
+    required this.url,
+    required this.online,
+  });
+
+  final String name;
+  final String? url;
+  final bool online;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        ProfileAvatar(name: name, url: url, size: 64),
+        if (online)
+          const Positioned(right: 2, bottom: 2, child: _OnlineDot()),
+      ],
+    );
+  }
+}
+
+class _OnlineDot extends StatelessWidget {
+  const _OnlineDot();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 12,
+      height: 12,
+      decoration: BoxDecoration(
+        color: const Color(0xFF22C55E),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: Theme.of(context).colorScheme.surface,
+          width: 2,
         ),
       ),
     );

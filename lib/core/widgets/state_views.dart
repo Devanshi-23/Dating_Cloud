@@ -40,46 +40,64 @@ class EmptyView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerLowest,
-                shape: BoxShape.circle,
-                border: Border.all(color: theme.colorScheme.outlineVariant),
-              ),
-              child: SizedBox.square(
-                dimension: 112,
-                child: Icon(icon, size: 48, color: theme.colorScheme.primary),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 320;
+        final iconBox = compact ? 56.0 : 112.0;
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(compact ? AppSpacing.md : AppSpacing.xl),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: (constraints.maxHeight - (compact ? 32 : 64)).clamp(
+                0,
+                double.infinity,
               ),
             ),
-            const SizedBox(height: AppSpacing.lg),
-            Text(
-              title,
-              style: theme.textTheme.titleLarge,
-              textAlign: TextAlign.center,
-            ),
-            if (message != null) ...[
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                message!,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerLowest,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: theme.colorScheme.outlineVariant),
+                  ),
+                  child: SizedBox.square(
+                    dimension: iconBox,
+                    child: Icon(
+                      icon,
+                      size: compact ? 26 : 48,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
                 ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-            if (action != null) ...[
-              const SizedBox(height: AppSpacing.lg),
-              action!,
-            ],
-          ],
-        ),
-      ),
+                SizedBox(height: compact ? AppSpacing.sm : AppSpacing.lg),
+                Text(
+                  title,
+                  style: compact
+                      ? theme.textTheme.titleMedium
+                      : theme.textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                if (message != null) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    message!,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+                if (action != null) ...[
+                  SizedBox(height: compact ? AppSpacing.sm : AppSpacing.lg),
+                  action!,
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }
