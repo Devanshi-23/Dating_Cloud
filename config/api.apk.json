@@ -1,0 +1,10 @@
+{
+  "APP_ENV": "development",
+  "DATA_MODE": "api",
+  "API_BASE_URL": "http://10.10.15.47:3000/api/v1",
+  "SOCKET_BASE_URL": "http://10.10.15.47:3000",
+  "MOCK_LATENCY_MS": "0",
+  "ALLOW_INTERNAL_MOCK": "false",
+  "FEATURE_CALLS": "false",
+  "FEATURE_AI_ASSISTANT": "false"
+}
