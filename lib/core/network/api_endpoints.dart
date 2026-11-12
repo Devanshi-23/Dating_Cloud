@@ -48,6 +48,14 @@ abstract final class ApiEndpoints {
   static String messageReport(String messageId) =>
       '/messages/$messageId/report';
 
+  static const calls = '/calls';
+  static const callsActive = '/calls/active';
+  static String call(String callId) => '/calls/$callId';
+  static String callAccept(String callId) => '/calls/$callId/accept';
+  static String callReject(String callId) => '/calls/$callId/reject';
+  static String callCancel(String callId) => '/calls/$callId/cancel';
+  static String callEnd(String callId) => '/calls/$callId/end';
+
   static String blockUser(String userId) => '/users/$userId/block';
   static const blocks = '/blocks';
   static const reports = '/reports';

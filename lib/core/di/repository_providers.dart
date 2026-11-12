@@ -8,6 +8,9 @@ import '../../app/config/environment.dart';
 import '../../features/auth/data/repositories/api_auth_repository.dart';
 import '../../features/auth/data/repositories/mock_auth_repository.dart';
 import '../../features/auth/domain/repositories/auth_repository.dart';
+import '../../features/calls/data/repositories/api_call_repository.dart';
+import '../../features/calls/data/repositories/mock_call_repository.dart';
+import '../../features/calls/domain/repositories/call_repository.dart';
 import '../../features/chat/data/repositories/api_chat_repository.dart';
 import '../../features/chat/data/repositories/mock_chat_repository.dart';
 import '../../features/chat/domain/repositories/chat_repository.dart';
@@ -80,6 +83,13 @@ final chatRepositoryProvider = Provider<ChatRepository>(
   (ref) => _useMock(ref, DataFeature.chat)
       ? MockChatRepository(ref.watch(mockBackendProvider))
       : ApiChatRepository(ref.watch(apiClientProvider)),
+);
+
+/// Calls share the chat data-mode switch (signalling rides the same socket).
+final callRepositoryProvider = Provider<CallRepository>(
+  (ref) => _useMock(ref, DataFeature.chat)
+      ? MockCallRepository(latency: ref.watch(appConfigProvider).mockLatency)
+      : ApiCallRepository(ref.watch(apiClientProvider)),
 );
 
 final subscriptionRepositoryProvider = Provider<SubscriptionRepository>(

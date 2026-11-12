@@ -9,6 +9,7 @@ import '../../features/auth/presentation/views/legal_view.dart';
 import '../../features/auth/presentation/views/sign_in_view.dart';
 import '../../features/auth/presentation/views/splash_view.dart';
 import '../../features/auth/presentation/views/welcome_view.dart';
+import '../../features/calls/presentation/views/call_view.dart';
 import '../../features/chat/presentation/views/conversation_view.dart';
 import '../../features/chat/presentation/views/conversations_view.dart';
 import '../../features/discovery/presentation/views/discover_view.dart';
@@ -53,6 +54,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RoutePaths.privacy,
         builder: (_, _) => const LegalView(document: LegalDocument.privacy),
+      ),
+      GoRoute(
+        path: '${RoutePaths.calls}/:callId',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (_, state) =>
+            CallView(callId: state.pathParameters['callId']!),
       ),
       StatefulShellRoute.indexedStack(
         builder: (_, _, shell) => HomeShell(navigationShell: shell),

@@ -6,6 +6,8 @@ import 'package:socket_io_client/socket_io_client.dart' as io;
 
 import '../../app/config/app_config.dart';
 import '../../app/config/environment.dart';
+import '../../features/calls/data/models/call_dto.dart';
+import '../../features/calls/domain/entities/call.dart';
 import '../../features/chat/data/models/chat_dto.dart';
 import '../di/core_providers.dart';
 import '../network/api_endpoints.dart';
@@ -94,8 +96,23 @@ class ApiChatSocket implements ChatSocket {
       ..on('match:new', (_) => _add(const MatchArrived()))
       ..on('match:removed', _onMatchRemoved)
       ..on('entitlement:updated', (_) => _add(const EntitlementChanged()))
+      ..on('call:incoming', (data) => _onCall(data, CallIncoming.new))
+      ..on('call:accepted', (data) => _onCall(data, CallAccepted.new))
+      ..on('call:rejected', (data) => _onCall(data, CallRejected.new))
+      ..on('call:cancelled', (data) => _onCall(data, CallCancelled.new))
+      ..on('call:ended', (data) => _onCall(data, CallEnded.new))
+      ..on('call:missed', (data) => _onCall(data, CallMissed.new))
+      ..on('call:busy', (data) => _onCall(data, CallBusy.new))
       ..on('session:expired', (_) => _refresh())
       ..connect();
+  }
+
+  void _onCall(dynamic data, ChatEvent Function(CallSession call) wrap) {
+    final raw = _map(data)['call'];
+    if (raw is! Map) return;
+    try {
+      _add(wrap(CallDto.fromJson(_map(raw))));
+    } catch (_) {}
   }
 
   @override

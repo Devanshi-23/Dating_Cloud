@@ -11,6 +11,8 @@ abstract final class RoutePaths {
   static const chats = '/chats';
   static const me = '/me';
   static const developerTools = '/me/developer';
+  static const calls = '/calls';
 
   static String conversation(String conversationId) => '$chats/$conversationId';
+  static String call(String callId) => '$calls/$callId';
 }

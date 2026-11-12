@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../../app/config/app_config.dart';
 import '../../../../app/router/route_names.dart';
 import '../../../../app/theme/app_colors.dart';
 import '../../../../app/theme/app_spacing.dart';
@@ -12,6 +13,8 @@ import '../../../../core/realtime/chat_socket.dart';
 import '../../../../core/realtime/presence.dart';
 import '../../../../core/widgets/async_value_view.dart';
 import '../../../../core/widgets/profile_avatar.dart';
+import '../../../calls/domain/entities/call.dart';
+import '../../../calls/presentation/viewmodels/active_call_controller.dart';
 import '../../../discovery/presentation/widgets/profile_card.dart';
 import '../../../onboarding/data/services/photo_picker.dart';
 import '../../../settings/presentation/account_sheets.dart';
@@ -101,6 +104,27 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
     final failure = ref.read(provider).value?.sendFailure;
     if (failure != null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(failure.message)));
+    }
+  }
+
+  Future<void> _startCall(CallType type) async {
+    final controller = ref.read(activeCallProvider.notifier);
+    await controller.start(
+      conversationId: widget.conversationId,
+      type: type,
+    );
+    if (!mounted) return;
+    final state = ref.read(activeCallProvider);
+    if (state.failure != null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(state.failure!.message)));
+      controller.clearFailure();
+      return;
+    }
+    final callId = state.call?.id;
+    if (callId != null) {
+      context.push(RoutePaths.call(callId));
     }
   }
 
@@ -262,6 +286,19 @@ class _ConversationViewState extends ConsumerState<ConversationView> {
           bottom: BorderSide(color: theme.colorScheme.outlineVariant),
         ),
         actions: [
+          if (other != null &&
+              ref.watch(appConfigProvider).featureFlags.calls) ...[
+            IconButton(
+              tooltip: 'Voice call',
+              onPressed: () => _startCall(CallType.audio),
+              icon: const Icon(Icons.call_outlined),
+            ),
+            IconButton(
+              tooltip: 'Video call',
+              onPressed: () => _startCall(CallType.video),
+              icon: const Icon(Icons.videocam_outlined),
+            ),
+          ],
           if (other != null)
             PopupMenuButton<String>(
               onSelected: (value) {

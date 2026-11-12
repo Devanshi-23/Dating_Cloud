@@ -52,7 +52,9 @@
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Save photos from your chats to your photo library.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Take a photo for your Dating Cloud profile.</string>
+	<string>Take a photo for your Dating Cloud profile, and share video during calls.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Your microphone is used for voice and video calls with matches.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your approximate location is used to show people nearby. Other members only see a rounded distance, never your exact location.</string>
 	<key>UIApplicationSupportsIndirectInputEvents</key>

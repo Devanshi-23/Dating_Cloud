@@ -169,6 +169,13 @@ class ConversationViewModel extends AsyncNotifier<ConversationState> {
       case MatchArrived():
       case MatchRemoved():
       case EntitlementChanged():
+      case CallIncoming():
+      case CallAccepted():
+      case CallRejected():
+      case CallCancelled():
+      case CallEnded():
+      case CallMissed():
+      case CallBusy():
         return current;
     }
   }

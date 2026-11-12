@@ -9,6 +9,7 @@ import '../../app/config/environment.dart';
 import '../../app/router/app_router.dart';
 import '../../app/router/route_names.dart';
 import '../../features/auth/presentation/viewmodels/session_view_model.dart';
+import '../../features/calls/presentation/viewmodels/active_call_controller.dart';
 import '../../features/chat/presentation/viewmodels/conversation_view_model.dart';
 import '../../features/chat/presentation/viewmodels/conversations_view_model.dart';
 import '../../features/matches/presentation/viewmodels/matches_view_model.dart';
@@ -76,6 +77,10 @@ class _RealtimeBinderState extends ConsumerState<RealtimeBinder>
     if (!mounted || tokens == null) return;
     await socket.connect(tokens.accessToken);
     await _prepareNotifications();
+    if (config.featureFlags.calls) {
+      // ignore: discarded_futures
+      ref.read(activeCallProvider.notifier).restoreActive();
+    }
     try {
       final platform = ref.read(platformRepositoryProvider);
       await platform.registerDevice();
@@ -83,6 +88,15 @@ class _RealtimeBinderState extends ConsumerState<RealtimeBinder>
       _messagesEnabled = prefs.messages;
       _matchesEnabled = prefs.newMatches;
     } catch (_) {}
+  }
+
+  void _openCall(String callId) {
+    if (!mounted || callId.isEmpty) return;
+    final router = ref.read(routerProvider);
+    final location = router.routerDelegate.currentConfiguration.uri.toString();
+    final target = RoutePaths.call(callId);
+    if (location.contains(target)) return;
+    router.push(target);
   }
 
   Future<void> _prepareNotifications() async {
@@ -106,6 +120,10 @@ class _RealtimeBinderState extends ConsumerState<RealtimeBinder>
   void _opened(NotificationResponse response) {
     final id = response.payload;
     if (id == null || id.isEmpty || !mounted) return;
+    if (id.startsWith('call:')) {
+      _openCall(id.substring(5));
+      return;
+    }
     ref.read(routerProvider).go(RoutePaths.conversation(id));
   }
 
@@ -184,9 +202,34 @@ class _RealtimeBinderState extends ConsumerState<RealtimeBinder>
         ref.invalidate(conversationsViewModelProvider);
       case EntitlementChanged():
         ref.invalidate(subscriptionViewModelProvider);
+      case CallIncoming(:final call):
+        if (!ref.read(appConfigProvider).featureFlags.calls) return;
+        _openCall(call.id);
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                'Incoming ${call.type.name} call',
+              ),
+            ),
+          );
+        _notify(
+          id: call.id.hashCode & 0x7fffffff,
+          title: 'Incoming call',
+          body: 'Tap to answer',
+          payload: 'call:${call.id}',
+        );
+      case CallAccepted():
+      case CallRejected():
+      case CallCancelled():
+      case CallEnded():
+      case CallMissed():
+      case CallBusy():
       case MessagesRead():
       case TypingChanged():
       case PresenceChanged():
+        // Call lifecycle is owned by ActiveCallController.
         break;
     }
   }

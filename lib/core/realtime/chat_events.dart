@@ -1,3 +1,4 @@
+import '../../features/calls/domain/entities/call.dart';
 import '../../features/chat/domain/entities/chat.dart';
 
 sealed class ChatEvent {
@@ -90,4 +91,46 @@ class MessageUnsent extends ChatEvent {
   final String conversationId;
   final String messageId;
   final Message message;
+}
+
+class CallIncoming extends ChatEvent {
+  const CallIncoming(this.call);
+
+  final CallSession call;
+}
+
+class CallAccepted extends ChatEvent {
+  const CallAccepted(this.call);
+
+  final CallSession call;
+}
+
+class CallRejected extends ChatEvent {
+  const CallRejected(this.call);
+
+  final CallSession call;
+}
+
+class CallCancelled extends ChatEvent {
+  const CallCancelled(this.call);
+
+  final CallSession call;
+}
+
+class CallEnded extends ChatEvent {
+  const CallEnded(this.call);
+
+  final CallSession call;
+}
+
+class CallMissed extends ChatEvent {
+  const CallMissed(this.call);
+
+  final CallSession call;
+}
+
+class CallBusy extends ChatEvent {
+  const CallBusy(this.call);
+
+  final CallSession call;
 }
